@@ -35,4 +35,11 @@
 
     <dimen name="padding_history_vertical">2dp</dimen>
     <dimen name="scroll_offset_ime">18dp</dimen>
+
+    <dimen name="fastscroll_thumb_width">5dp</dimen>
+    <dimen name="fastscroll_thumb_min_length">40dp</dimen>
+    <dimen name="fastscroll_thumb_margin_end">2.5dp</dimen>
+    <dimen name="fastscroll_thumb_margin_vertical">4dp</dimen>
+    <dimen name="fastscroll_touch_target_width">32dp</dimen>
+    <dimen name="fastscroll_touch_slop_vertical">8dp</dimen>
 </resources>

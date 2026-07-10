@@ -1,14 +1,14 @@
 <resources>
     <string name="title_settings">Настройки</string>
-    <string name="xposed_desc">Универсальное решение для расшифровки и экспорта прокси-подписок, предназначенных только для Happ</string>
+    <string name="xposed_desc">Универсальное решение для расшифровки и экспорта прокси-подписок в любые приложения</string>
 
     <string name="label_captured_urls">Перехваченные ссылки</string>
     <string name="label_result">Результат</string>
     <string name="label_xposed_inactive">Xposed неактивен</string>
     <string name="label_xposed_active">Xposed</string>
     <string name="label_lspatch_active">LSPatch</string>
-    <string name="label_hwid_unknown">HWID неизвестен. Введите вручную\nили запустите Happ</string>
-    <string name="label_history_empty">Здесь ничего нет. Запустите Happ и импортируйте/обновите зашифрованные подписки. Расшифрованные ссылки появятся здесь.</string>
+    <string name="label_hwid_unknown">HWID неизвестен. Введите вручную\nили запустите целевое приложение</string>
+    <string name="label_history_empty">Здесь пока пусто. Импортируйте или обновите подписку в вашем приложении — расшифрованные ссылки появятся тут.</string>
     <string name="label_result_default">Заполните три поля выше и нажмите на кнопку &lt;b&gt;Профили&lt;/b&gt; — конфигурации вашей подписки появятся здесь, и вы сможете скопировать их в любой прокси-клиент. Кнопка &lt;b&gt;Подписка&lt;/b&gt; позволяет обновлять профили в других приложениях через службу Моста.</string>
     <string name="label_lspatch_mode">Режим LSPatch</string>
     <string name="label_intercept_links">Перехватывать ссылки</string>
@@ -27,17 +27,21 @@
     <string name="btn_back">Назад</string>
 
     <string name="info_url_title">Ссылка на подписку</string>
-    <string name="info_url_msg">Вставьте ссылку на вашу VPN-подписку, привязанную к Happ.
+    <string name="info_url_msg">Вставьте ссылку на вашу VPN-подписку.
         &lt;br&gt;&lt;br&gt;
         Поддерживаются форматы:&lt;br&gt;
         &#8226;&amp;nbsp;&lt;tt&gt;https://&lt;/tt&gt;&lt;br&gt;
         &#8226;&amp;nbsp;&lt;tt&gt;http://&lt;/tt&gt;&lt;br&gt;
         &#8226;&amp;nbsp;&lt;tt&gt;happ://add&lt;/tt&gt;&lt;br&gt;
-        &#8226;&amp;nbsp;&lt;tt&gt;happ://crypt&lt;/tt&gt; (включая &lt;tt&gt;crypt5&lt;/tt&gt;)&lt;br&gt;
+        &#8226;&amp;nbsp;&lt;tt&gt;happ://crypt&lt;/tt&gt;&lt;br&gt;
+        &#8226;&amp;nbsp;&lt;tt&gt;v2raytun://crypt&lt;/tt&gt;&lt;br&gt;
+        &#8226;&amp;nbsp;&lt;tt&gt;v2raytun://import&lt;/tt&gt;&lt;br&gt;
+        &#8226;&amp;nbsp;&lt;tt&gt;incy://add&lt;/tt&gt;&lt;br&gt;
+        &#8226;&amp;nbsp;&lt;tt&gt;incy://import&lt;/tt&gt;&lt;br&gt;
         &#8226;&amp;nbsp;&lt;tt&gt;http://127.0.0.1:8166&lt;/tt&gt; (ссылка Моста Happwner)
     </string>
     <string name="info_hwid_msg">У каждого устройства есть свой уникальный HWID — по нему VPN-провайдер определяет, какое устройство подключено к подписке, и может ограничить доступ, если достигнут лимит по количеству подключений. Подменив идентификатор, вы сможете обойти это ограничение, если укажете HWID любого устройства, уже подключённого к подписке.</string>
-    <string name="info_ua_msg">При запросе подписок Happ отправляет VPN-провайдеру название и версию приложения. Happwner имитирует это поведение.</string>
+    <string name="info_ua_msg">При запросе подписок все VPN-приложения сообщают провайдерам информацию о себе (обычно название и версию). Happwner позволяет запрашивать подписки от имени любого приложения, разрешённого VPN-провайдером.</string>
 
     <string name="label_language">Язык</string>
     <string name="label_theme">Тема</string>
@@ -51,7 +55,7 @@
     <string name="setting_process_b64">Base64 в текст</string>
     <string name="setting_process_b64_desc">Декодировать Base64-данные, полученные от сервера</string>
     <string name="setting_process_xray">Xray в sing-box</string>
-    <string name="setting_process_xray_desc">Конвертировать полученные конфиги для Happ (формат Xray) в конфиги для NekoBox, husi, Hiddify и подобных (формат sing-box)</string>
+    <string name="setting_process_xray_desc">Конвертировать полученные Xray-конфиги в формат sing-box для NekoBox, husi, Hiddify и подобных</string>
     <string name="setting_header_response_info"><![CDATA[
 При запросе VPN-профилей Happwner будет преобразовывать полученные Base64/JSON-данные в совместимые форматы с другими приложениями.<br/><br/>
 Отключите эти функции, если профили обрабатываются неправильно.
@@ -83,13 +87,13 @@
     ]]></string>
     <string name="setting_process_manual">При запросе профилей</string>
     <string name="setting_process_server">При использовании Моста</string>
-    <string name="setting_hook_unlock">Разблокировать профили в Happ</string>
+    <string name="setting_hook_unlock">Разблокировать профили</string>
     <string name="setting_hook_unlock_desc">Разблокировать функции экспорта и редактирования профилей зашифрованных подписок</string>
     <string name="setting_header_appearance">Внешний вид</string>
     <string name="setting_header_response">Обработка профилей</string>
     <string name="setting_bridge_header">Мост подписок</string>
     <string name="setting_enable_bridge">Мост</string>
-    <string name="setting_enable_bridge_desc">Запустить локальный HTTP-прокси-сервер для обновления Happ-подписок в других приложениях</string>
+    <string name="setting_enable_bridge_desc">Запустить локальный HTTP-прокси-сервер для обновления подписок в других приложениях</string>
     <string name="setting_battery_opt">Оптимизация батареи</string>
     <string name="setting_battery_opt_desc">Игнорировать ограничения энергопотребления. Рекомендуется для стабильной работы сервера, необходимо для Watchdog</string>
     <string name="setting_battery_opt_unrestricted">Ограничение снято</string>
@@ -101,15 +105,17 @@
     <string name="notif_channel_desc">Канал локального HTTP-сервера</string>
     <string name="notif_title">Мост подписок</string>
     <string name="tile_bridge_label">Мост</string>
-    <string name="notif_content">Позволяет обновлять подписки для Happ в других приложениях</string>
+    <string name="notif_content">Позволяет обновлять подписки в других приложениях</string>
 
     <string name="msg_clipboard_empty">Буфер обмена пуст</string>
     <string name="msg_enter_url">Введите URL</string>
     <string name="msg_loading">Загрузка…</string>
-    <string name="msg_text_truncated">\n\n… [Текст обрезан для экономии ресурсов. Нажмите «Копировать», чтобы получить полный результат]</string>
+    <string name="msg_text_truncated">\n\n…текст обрезан для экономии ресурсов\n</string>
+    <string name="msg_show_full">Показать полностью</string>
+    <string name="msg_please_wait">Подождите…</string>
     <string name="msg_decrypted">Расшифровано</string>
-    <string name="msg_bridge_service_enable">Эта функция позволяет обновлять подписки для Happ в любых прокси-клиентах через службу Happwner. По нажатии «ОК» Happwner запросит разрешение на показ уведомлений, запустит службу и скопирует ссылку в буфер обмена — импортируйте её в ваше приложение.&lt;br&gt;&lt;br&gt;&lt;b&gt;Важно:&lt;/b&gt; включите «Обход LAN» или добавьте правило &lt;tt&gt;geoip:private&lt;/tt&gt; в &lt;tt&gt;direct&lt;/tt&gt;, иначе обновление не будет работать при активном соединении в вашем прокси-клиенте.</string>
-    <string name="msg_bridge_service_info">Эта функция позволяет обновлять подписки для Happ в любых прокси-клиентах через службу Happwner.&lt;br&gt;&lt;br&gt;&lt;b&gt;Важно:&lt;/b&gt; включите «Обход LAN» или добавьте правило &lt;tt&gt;geoip:private&lt;/tt&gt; в &lt;tt&gt;direct&lt;/tt&gt;, иначе обновление не будет работать при активном соединении в вашем прокси-клиенте.</string>
+    <string name="msg_bridge_service_enable">Эта функция позволяет обновлять подписки в любых прокси-клиентах через службу Happwner. По нажатии «ОК» Happwner запросит разрешение на показ уведомлений, запустит службу и скопирует ссылку в буфер обмена — импортируйте её в ваше приложение.&lt;br&gt;&lt;br&gt;&lt;b&gt;Важно:&lt;/b&gt; включите «Обход LAN» или добавьте правило &lt;tt&gt;geoip:private&lt;/tt&gt; в &lt;tt&gt;direct&lt;/tt&gt;, иначе обновление не будет работать при активном соединении в вашем прокси-клиенте.</string>
+    <string name="msg_bridge_service_info">Эта функция позволяет обновлять подписки в любых прокси-клиентах через службу Happwner.&lt;br&gt;&lt;br&gt;&lt;b&gt;Важно:&lt;/b&gt; включите «Обход LAN» или добавьте правило &lt;tt&gt;geoip:private&lt;/tt&gt; в &lt;tt&gt;direct&lt;/tt&gt;, иначе обновление не будет работать при активном соединении в вашем прокси-клиенте.</string>
 
     <string name="error_unsupported_happ_link">Расшифруйте ссылку (требуется Xposed/LSPatch)</string>
     <string name="error_decrypt_first">Расшифруйте ссылку</string>
@@ -126,7 +132,7 @@
 
     <string name="about_app">О приложении</string>
     <string name="about_app_text">
-        Бесплатный и открытый инструмент для экспорта зашифрованных Happ-подписок в любые приложения.
+        Бесплатный и открытый инструмент для экспорта прокси-подписок в любые приложения.
         &lt;br&gt;&lt;br&gt;
         &lt;b&gt;Состояние:&lt;/b&gt; %2$s
         &lt;br&gt;&lt;br&gt;
@@ -139,4 +145,6 @@
 
     <string name="setting_monet_accent">Monet</string>
     <string name="setting_monet_accent_desc">Динамический цвет на основе обоев главного экрана</string>
+
+    <string name="ua_select_title">Выбор User-Agent</string>
 </resources>

@@ -13,6 +13,11 @@ object PrefsManager {
 
     const val HAPP_PKG_PRIMARY = "com.happproxy"
     const val HAPP_PKG_SECONDARY = "su.happ.proxyutility"
+    const val V2RAYTUN_PKG = "com.v2raytun.android"
+    const val INCY_PKG = "llc.itdev.incy"
+
+    // All packages whose subscriptions the unlock hook can target
+    private val UNLOCK_PKGS = arrayOf(HAPP_PKG_PRIMARY, HAPP_PKG_SECONDARY, V2RAYTUN_PKG)
 
     fun getSafePrefs(context: Context): SharedPreferences {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -46,22 +51,22 @@ object PrefsManager {
         return false
     }
 
-    // Which Happ packages (primary/secondary) are currently installed
-    fun installedHappPackages(context: Context): List<String> {
+    // Which unlock-target packages (Happ variants + v2RayTun) are currently installed
+    fun installedUnlockPackages(context: Context): List<String> {
         val result = mutableListOf<String>()
-        for (pkg in arrayOf(HAPP_PKG_PRIMARY, HAPP_PKG_SECONDARY)) {
+        for (pkg in UNLOCK_PKGS) {
             if (isPackageInstalled(context, pkg)) result.add(pkg)
         }
         return result
     }
 
-    // Happ is active under Xposed (installed) or LSPatch (present in the patched set)
-    fun isHappActiveForModule(context: Context): Boolean {
-        if (ModuleStatus.isModuleActive() && installedHappPackages(context).isNotEmpty()) {
+    // An unlock target is active under Xposed (installed) or LSPatch (present in the patched set)
+    fun isUnlockTargetActiveForModule(context: Context): Boolean {
+        if (ModuleStatus.isModuleActive() && installedUnlockPackages(context).isNotEmpty()) {
             return true
         }
         val lspatchApps = getSafePrefs(context).getStringSet("lspatch_apps", null) ?: return false
-        return lspatchApps.contains(HAPP_PKG_PRIMARY) || lspatchApps.contains(HAPP_PKG_SECONDARY)
+        return UNLOCK_PKGS.any { lspatchApps.contains(it) }
     }
 
     // HWID spoof: explicit user choice if set, otherwise default to Xposed-active
@@ -79,31 +84,31 @@ object PrefsManager {
         return getSafePrefs(context).getBoolean("use_custom_hwid_input", false)
     }
 
-    // Unlock-settings hook: explicit choice if set, else default when module + Happ are active
-    fun isHappUnlockHookEnabled(context: Context): Boolean {
+    // Unlock-settings hook: explicit choice if set, else default when module + an unlock target are active
+    fun isUnlockHookEnabled(context: Context): Boolean {
         val p = getSafePrefs(context)
         if (p.contains("hook_happ_unlock_settings")) {
             return p.getBoolean("hook_happ_unlock_settings", false)
         }
-        return isXposedActive(context) && isHappActiveForModule(context)
+        return isXposedActive(context) && isUnlockTargetActiveForModule(context)
     }
 
-    // Push the current HWID / intercept / unlock state to the hooked Happ process
+    // Push the current HWID / intercept / unlock state to the hooked process
     fun broadcastSettings(context: Context) {
         val prefs = getSafePrefs(context)
         val custom = prefs.getString("custom_hwid", "") ?: ""
         val isActive = isHwidSpoofActive(context)
         val hwidToSend = if (isActive) custom else ""
         val isInterceptEnabled = prefs.getBoolean("intercept_enabled", false)
-        val isUnlockHookEnabled = isHappUnlockHookEnabled(context)
+        val unlockEnabled = isUnlockHookEnabled(context)
 
-        Log.d(TAG, "Broadcasting settings: HWID=$hwidToSend, SpoofActive=$isActive, Unlock=$isUnlockHookEnabled")
+        Log.d(TAG, "Broadcasting settings: HWID=$hwidToSend, SpoofActive=$isActive, Unlock=$unlockEnabled")
 
         val intent = Intent("${context.packageName}.SETTINGS_UPDATE").apply {
             putExtra("custom_hwid", hwidToSend)
             putExtra("use_custom_hwid_substitution", isActive)
             putExtra("intercept_enabled", isInterceptEnabled)
-            putExtra("hook_happ_unlock_settings", isUnlockHookEnabled)
+            putExtra("hook_happ_unlock_settings", unlockEnabled)
             addFlags(0x01000000) // FLAG_RECEIVER_INCLUDE_BACKGROUND
         }
         context.sendBroadcast(intent)

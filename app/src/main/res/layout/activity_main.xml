@@ -49,13 +49,19 @@
 
     </com.google.android.material.appbar.AppBarLayout>
 
-    <ScrollView
+    <FrameLayout
+        android:id="@+id/resultViewport"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+    <com.happwner.NoAutoScrollView
         android:id="@+id/mainScrollView"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:fillViewport="true"
         android:clipToPadding="false"
-        android:overScrollMode="never">
+        android:overScrollMode="never"
+        android:scrollbars="vertical">
 
         <LinearLayout
             android:id="@+id/mainContainer"
@@ -314,7 +320,6 @@
                                 android:layout_height="wrap_content"
                                 android:inputType="textMultiLine"
                                 android:textColor="@color/text_input_color_selector"
-                                android:enabled="false"
                                 android:maxLines="2" />
                         </com.google.android.material.textfield.TextInputLayout>
                         <ImageButton
@@ -323,7 +328,7 @@
                             android:layout_height="@dimen/btn_icon_size"
                             android:layout_marginStart="@dimen/spacing_small"
                             android:background="@drawable/bg_icon_ripple"
-                            android:src="@drawable/ic_edit"
+                            android:src="@drawable/ic_list_alt"
                             app:tint="@color/text_secondary" />
                         <ImageButton
                             android:id="@+id/infoUserAgent"
@@ -436,7 +441,25 @@
             </com.google.android.material.card.MaterialCardView>
 
         </LinearLayout>
-    </ScrollView>
+    </com.happwner.NoAutoScrollView>
+
+        <TextView
+            android:id="@+id/outputWaitLabel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center"
+            android:text="@string/msg_please_wait"
+            android:textColor="@color/text_primary"
+            android:textSize="16sp"
+            android:alpha="0"
+            android:visibility="gone" />
+
+        <com.happwner.FastScrollThumb
+            android:id="@+id/fastScrollThumb"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent" />
+
+    </FrameLayout>
 
 </LinearLayout>
 

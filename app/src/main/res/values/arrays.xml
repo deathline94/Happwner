@@ -28,5 +28,7 @@
     <string-array name="xposed_scope">
         <item>com.happproxy</item>
         <item>su.happ.proxyutility</item>
+        <item>com.v2raytun.android</item>
+        <item>llc.itdev.incy</item>
     </string-array>
 </resources>

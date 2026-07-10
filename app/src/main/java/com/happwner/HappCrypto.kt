@@ -28,7 +28,7 @@ object HappCrypto {
         0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b, 0x6b
     )
 
-    // 16-byte keys, recovered via LSB steganography from Happ's PNG drawables
+    // 16-byte AES keys for the response body, reassembled from native-lib and PNG-drawable pieces
     private val KEYS: Map<String, ByteArray> = mapOf(
         "key01" to "key01:3jk#R2d&Dd".toByteArray(Charsets.US_ASCII),
         "key02" to "key02:+]%4ij#P\"/".toByteArray(Charsets.US_ASCII),
@@ -148,7 +148,6 @@ object HappCrypto {
 
     // Prefixes mapped to ordinals: crypt=0 ... crypt5=4
     private val HAPP_PREFIXES = arrayOf(
-
         "happ://crypt5/" to 4,
         "happ://crypt4/" to 3,
         "happ://crypt3/" to 2,
@@ -384,32 +383,68 @@ object HappCrypto {
         val body = shuffled.substring(4, shuffled.length - 4)
         require(body.length >= 13) { "crypt5 body too short" }
 
-        // 12-char nonce, then a length-prefixed url-b64 segment, then the RSA blob
-        val nonceStr = body.substring(0, 12)
-        val rest = body.substring(12)
+        val privateKey = loadPkcs8Key(marker)
+            ?: throw IllegalArgumentException("unknown crypt5 marker: $marker")
 
+        // legacy: nonce(12), then length-prefixed url-b64, then the RSA blob (key = rsaValue); salted: a 2-char tag + 8-char salt follow the nonce (key = salt-repeated XOR rsaValue)
+        // body[12] is a digit only in legacy, so try that layout first and fall back to the other on tag failure
+        val preferSalted = body.length > 12 && body[12] !in '0'..'9'
+        val layouts = if (preferSalted) booleanArrayOf(true, false) else booleanArrayOf(false, true)
+
+        var lastError: Exception? = null
+        for (salted in layouts) {
+            try {
+                return decryptCrypt5Body(body, privateKey, salted)
+            } catch (e: Exception) {
+                lastError = e
+            }
+        }
+        throw lastError ?: IllegalArgumentException("crypt5 decryption failed")
+    }
+
+    private fun decryptCrypt5Body(body: String, privateKey: PrivateKey, salted: Boolean): String {
+        // 12-char ASCII nonce; salted layout inserts a 2-char tag + 8-char salt before the length-prefixed segment
+        val nonceStr = body.substring(0, 12)
+        val salt: ByteArray?
+        val lenStart: Int
+        if (salted) {
+            require(body.length >= 22) { "crypt5 header too short for salted layout" }
+            salt = body.substring(14, 22).toByteArray(Charsets.US_ASCII)
+            lenStart = 22
+        } else {
+            salt = null
+            lenStart = 12
+        }
+
+        val rest = body.substring(lenStart)
         var digitCount = 0
         while (digitCount < rest.length && rest[digitCount] in '0'..'9') digitCount++
         require(digitCount > 0) { "crypt5 segment length missing" }
         val segmentLen = rest.substring(0, digitCount).toIntOrNull()
             ?: throw IllegalArgumentException("crypt5 segment length not parseable")
         val packed = rest.substring(digitCount)
-        require(packed.length >= 1 + segmentLen) { "crypt5 segment truncated" }
+        require(segmentLen in 0..(packed.length - 1)) { "crypt5 segment truncated" }
 
         val urlB64 = packed.substring(1, 1 + segmentLen)
         val rsaCipher = packed.substring(1 + segmentLen)
 
-        // RSA-decrypt to recover the 32-byte ChaCha key
-        val privateKey = loadPkcs8Key(marker)
-            ?: throw IllegalArgumentException("unknown crypt5 marker: $marker")
-
+        // RSA-decrypt to recover the 32-byte value behind the ChaCha key
         val rsaPlainBytes = rsaPkcs1v15Decrypt(privateKey, b64DecodeFlexible(rsaCipher))
         val rsaPlainStr = latin1Decode(rsaPlainBytes)
-        val chachaKey = b64DecodeFlexible(swapPairs(rsaPlainStr))
-        require(chachaKey.size == 32) { "chacha key has invalid length: ${chachaKey.size}" }
+        val rsaValue = b64DecodeFlexible(swapPairs(rsaPlainStr))
+        require(rsaValue.size == 32) { "chacha key has invalid length: ${rsaValue.size}" }
+
+        val chachaKey: ByteArray = if (salted) {
+            val s = salt ?: throw IllegalStateException("missing salt")
+            require(s.size == 8) { "crypt5 salt must be 8 bytes" }
+            ByteArray(32) { i -> (rsaValue[i].toInt() xor s[i % 8].toInt()).toByte() }
+        } else {
+            rsaValue
+        }
 
         val nonce = nonceStr.toByteArray(Charsets.US_ASCII)
         require(nonce.size == 12) { "nonce must be 12 bytes" }
+
         // ChaCha20-Poly1305 decrypt, then one more swap + base64 to the plaintext
         val ciphertext = b64DecodeFlexible(urlB64)
         val intermediate = ChaCha20Poly1305.decrypt(chachaKey, nonce, ByteArray(0), ciphertext)
@@ -518,7 +553,6 @@ object HappCrypto {
     }
 
     private fun rsaModulusBitLength(privateKey: PrivateKey): Int {
-
         val modulus = (privateKey as? java.security.interfaces.RSAKey)?.modulus
             ?: throw IllegalStateException("PrivateKey is not RSAKey: ${privateKey.javaClass}")
         return modulus.bitLength()
@@ -604,7 +638,6 @@ object HappCrypto {
 
     // Pure ChaCha20-Poly1305 implementation (RFC 8439), no external dependencies
     private object ChaCha20Poly1305 {
-
         private const val C0 = 0x61707865 // "expa"
         private const val C1 = 0x3320646e // "nd 3"
         private const val C2 = 0x79622d32 // "2-by"
@@ -715,7 +748,6 @@ object HappCrypto {
             var x12 = s12; var x13 = s13; var x14 = s14; var x15 = s15
 
             for (i in 0 until 10) {
-
                 x0 += x4;  x12 = rotl32(x12 xor x0, 16)
                 x8 += x12; x4  = rotl32(x4  xor x8, 12)
                 x0 += x4;  x12 = rotl32(x12 xor x0, 8)
@@ -796,7 +828,6 @@ object HappCrypto {
         }
 
         private fun leBytesToBigInt(b: ByteArray, off: Int, len: Int): BigInteger {
-
             if (len == 0) return BigInteger.ZERO
             val be = ByteArray(len + 1)
             for (i in 0 until len) {
@@ -834,6 +865,8 @@ object HappCrypto {
 
     // Private RSA keys (PKCS#8, base64) for crypt5, keyed by an 8-char marker
     private val CRYPT5_PKCS8_KEYS_B64: Map<String, String> = mapOf(
+        "asajzqxt" to "MIIJQwIBADANBgkqhkiG9w0BAQEFAASCCS0wggkpAgEAAoICAQDHUojQlH6tP2DBvQ5IG4OM5qNb5PsF0uGx6XoJsnJEqZwqcp50HUtVOmNGvZhtAEG1v9HBQpwJ9ckmeW0InN871x8qEA/bWKFS6dc0PeNBSzTqB0ubCyRuYaGMa7be9ij8A6Z7OjiIlZceE6EzcnPDk1F1p2V6G7JQgO/dujOuE9Y5v8iQ4NJHBU7D+ypwNNg8ZOILm9gs1xoH4na3z8CAQqJhQ5Zr5MM0zZc6/2OcBM8hWO7asqvmjblFxBs4oubshKJLIZN7daZaBsZAMtlyzfbF/KRvvOu9zpS1c17sixxR3u8BN1+8zXrtfanUwcFWPQ67TOGECtlIWjqa5zz+HkT98ecQepw+i8hpb30ITt/WNjansoANSEJ6nDnkmcT28i+aI9XSeeg/oTygIwuGgg0P4533+Go53gqKaGG77kP4uZgiMaX24u1Gx4p9pdcqN+22/rr7PiXOvJQtWE47QyHXggC7gGEEuQ4DlWNECxMB6sux7igx/qoeNLeWZrIF2kbuzSHxAzgwTJGg1wAFndxww3IlFh7a4g92P6GF4aRA9bf8sx92G2FCfFxLKDo2o2FlS7AXrp97JjVxKw9KeTb9vVMHFNqmk5+m8Gy4OMQNayFeXB3q5KbEC9KJPHBIdTnLNg4fXPEGcmCqursp2sI1VRYJxOR/jv0lggMHwQIDAQABAoICAF44wbv3tjonb5Gl0Q59Ex6UGDzkbVU/brkvaSUUWbfjhZL7Q7QX9PiA9VUHYvqD2IwV9Q2qcyCyMzggxk3/+fbLpku39Ab4SqprJ/PmHXtMFeNbN34/MiWLuVYrxPJ44r7e6t/tkbPfIuRw2w7614ZoKWW4j9u9I/myObFSyANOFUKPSjxSSpSQCb/TByirklxaRBDAxtvLgt6fSwdxCcqXtTLNRFoUdcKMPSUCfQ/PpipZY++17lS6Qg6cuVF4kDjWKfHiGVmPL+f2s9i9MNV4T2MgHotDfxzmfp2XwBOJXwXEoK6ugm85oxaJBLMyNDaT/lbD7QcCKdxt6q43CTkxfUryW3c9iPqkbe9LBtvUWvs9NtA9wbGLeovavwk4+/fh/1MHhGoNDg1jcPQzPkXJ3oZjkXmzadk0Q3kQZ2yEQUDCuFOgESC1WTyxEhTFx/D/ZvQa3y75VqkxJ8QliwUi1dTCXlO6fxctqj8pVSU2umighxCW/eatEH/kwjNuGpIH9xA3pBw6lXvftCjWjlTB7VCGkaWHtBWD/dKF4b6WNoWKOHqFs1ojlHepUU6dB3xJrmYbqxgL7Mh8FFvVkWdE6pWknGPU+xn4yTk/+S6jjEGSJPocq756xVy604AZch+wgBERhmt430+Jkk7Reevmy+JngXb/7Qg8NmwIDn9RAoIBAQDiHf0gyZduI4/iKt2CC8UG4PvtBsOGfKU+ueMXgr9eQOc/Pa2wg5Oaiw7fr6oJatkzDrBPNr9aX387pfrc9jg3M7sba49GuGwhuOlCCD2TrkMAt1oX6iOChe0ucnCfDRUTP3W+LAG7IQbQTaNpmbF2imDDoksB/1CC1HjoZlONYFSlDxD0ir+BhIvzl1yE8Bh2MSiceMMHmGR7T4jcn9kxC0dSY7SKfDDkibwGZWD7HDUEeJMBZMKwkuN2InEV0GuvtL/ASLdMQWudSY+mmASLrVeOu208RdACnulm5tYn0mGeg85+ntniqdFDFDpROtGEYJoqq9jgPANlNHz1yKIjAoIBAQDhqgYkMSBkB06Y4rJtTxhI9sIF334yaOL8pFRPT1uBnNgnGhND0+9VXU1vKWgqmMTGg0eZOus7SBJGZitcNyZoUK/RdtvlkSadbKv4vmR/Q4V7TZqIDprHHRmmDf5S/lvZycsa5tJbBofm0pTUMV9yhlIyXpN2NDRTFheevFpp4QLtrmUtmgl9UxJ46DcToYACiGPaI8HEzWshJPOJgwJl65x0LZpgx8NKFzFVRDpHYKGoE37QFdITQ0KAZ2t9wDO3Nv20s8YSL0TpjRu9oWoG1pw5fTWhf37Q8XseKMqbW56xsWE4JkfleyGtBOhudAmp+b3o+ESD+eUILe67rBLLAoIBAQC4l/7Ty39CPOnzm0bmKbGZYgaIhCMPIabNRHet8+FCkv211SZ8mY3gdnGYDxJjScUzN2Sb5nfk0V1PVrsrtB5EgojXY8G93ET6ariSXaPXckXkycpVB6Ihpi/w4SAr2ERCSGZY8Bghql6jox4q0Xvc6C8CxvUxFjul8ssZ/p9rJR80+M3AtZyNoaWXIRQ4usFdi9g5lSSyiKhPOqjiY+StcyWwjxEOlUBc8kx7dDvuBCMMGVr5okaGXAQxpwBm7JVdBdQcp8BsEmRGLY2GVUgwtzxpm30b3WppGU414XEnZUqoW7YyDICX2Ear2lGZiskMpsh02YHd3WBwOJ9jD329AoIBAQDQJCLF/woBOTwlh/NLH0knA3KyOBIOLPAwVuHsxSWBx0kXx9U9Gp4F/qkNfwO1RnM5Jp1DmDSf2ToB9PrJc5TZYpLIgPkSJW+YhEOaiwHm4ECeGlYOaGoafZzKrN2Hb1UI7DeJ+JzNmJiBLnpXvbJrz7jA/LrGrCAXAqmGn/RE9GXfFJv+E7XtAlJncshaMvv/Wg2/hnuTKmVFjO+URmJP36HPBsD9w0M9c2btXqDidR6mCFVPWNELM16DUOC0fDM3KmGX6rkmzLKjOKP9pIRHCmvOGs78xrwRvKnyh21ZHoihHRquz6BA6fGFxKEeP6kqPlAMMfIASN4XTUaFk5FBAoIBABVSiXK666nx/w7tFiXW9E7+Kz9nkFqUIPQrbqH3FQHu8eWhXBY3qVjMbBgZDL/BxNF7dxQQXEIwfUEa1eaC0n8K6jQQ2jsCpH16iKPR/zpZIrUOl6aZW4CBQMkCENt7MMI9hHybN+rEi4b7KIb3LjZhaITL57SG9j+Y5U/RSaE1nlie28aiz1IToCsIaONJ2BYu4VDqjGwZFfkGMiwDCTkvakslq8xN6rUxnAqxe/9Usz1j3vblbARaKe03cROh+7DNaVW3SIHfFlECLHWqii4NtDS1VlLTfRnk+IhbyaVoGILISkkFDKS3xgNqfXaTObkqEpdV3u06gg7ptdTNsvk=",
+        "vdfzfoff" to "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",
         "axrtpjmw" to "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",
         "buizdcgd" to "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",
         "dfkqhuls" to "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",

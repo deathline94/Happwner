@@ -1,7 +1,6 @@
 package com.happwner
 
 import org.json.JSONArray
-import org.json.JSONException
 import org.json.JSONObject
 import org.json.JSONTokener
 import java.net.URLEncoder
@@ -142,7 +141,7 @@ object LinkConverter {
                         else res.append(t).append("\n")
                     }
                     return@forEach
-                } catch (_: Exception) {}
+                } catch (_: Throwable) {}
             }
 
             res.append(t).append("\n")
@@ -166,7 +165,7 @@ object LinkConverter {
             val t = JSONTokener(s)
             t.nextValue()
             t.nextClean().code == 0
-        } catch (_: JSONException) {
+        } catch (_: Throwable) {
             false
         }
     }
@@ -181,19 +180,46 @@ object LinkConverter {
 
     private data class FilterResult(val text: String, val skipped: Int)
 
+    // Normalize vless flow to its sing-box-valid form (xtls-rprx-vision-udp443 -> xtls-rprx-vision)
+    private fun normalizeConfigFlowsInPlace(cfg: JSONObject): Boolean {
+        val outs = cfg.optJSONArray("outbounds") ?: return false
+        var changed = false
+        for (i in 0 until outs.length()) {
+            val ob = outs.optJSONObject(i) ?: continue
+            if (ob.optString("protocol") != "vless") continue
+            val vnext = ob.optJSONObject("settings")?.optJSONArray("vnext") ?: continue
+            for (j in 0 until vnext.length()) {
+                val users = vnext.optJSONObject(j)?.optJSONArray("users") ?: continue
+                for (k in 0 until users.length()) {
+                    val u = users.optJSONObject(k) ?: continue
+                    val flow = u.optString("flow", "")
+                    if (flow.isNotEmpty()) {
+                        val norm = SingBoxConverter.normalizeFlow(flow)
+                        if (norm != flow) { u.put("flow", norm); changed = true }
+                    }
+                }
+            }
+        }
+        return changed
+    }
+
     // Keep one xray config/array, dropping unsupported outbounds
     private fun preFilterUnsupportedXrayOne(t: String): FilterResult? {
         if (t.isEmpty()) return null
         if (!isWholeJsonValue(t)) return null
         if (t.startsWith("{")) {
             return when (SingBoxConverter.convertToOutbounds(t, "")) {
-                is SingBoxConverter.OutboundsResult.Ok -> FilterResult(t, 0)
+                is SingBoxConverter.OutboundsResult.Ok -> {
+                    val cfg = try { JSONObject(t) } catch (_: Throwable) { null }
+                    if (cfg != null && normalizeConfigFlowsInPlace(cfg)) FilterResult(cfg.toString(), 0)
+                    else FilterResult(t, 0)
+                }
                 SingBoxConverter.OutboundsResult.Unsupported -> FilterResult("", 1)
                 SingBoxConverter.OutboundsResult.NotXray -> null
             }
         }
         if (t.startsWith("[")) {
-            val arr = try { JSONArray(t) } catch (_: JSONException) { return null }
+            val arr = try { JSONArray(t) } catch (_: Throwable) { return null }
             val out = JSONArray()
             var anyXray = false
             var skipped = 0
@@ -206,6 +232,7 @@ object LinkConverter {
                 }
                 when (SingBoxConverter.convertToOutbounds(obj.toString(), "")) {
                     is SingBoxConverter.OutboundsResult.Ok -> {
+                        normalizeConfigFlowsInPlace(obj)
                         out.put(obj)
                         anyXray = true
                     }
@@ -250,7 +277,7 @@ object LinkConverter {
 
     // Convert each xray config inside an array to sing-box
     private fun tryConvertXrayArray(text: String, compact: Boolean): ArrayConvResult? {
-        val arr = try { JSONArray(text) } catch (_: JSONException) { return null }
+        val arr = try { JSONArray(text) } catch (_: Throwable) { return null }
         if (arr.length() == 0) return null
 
         var anyXray = false
@@ -303,7 +330,7 @@ object LinkConverter {
         }
 
         fun ingestArray(s: String): Boolean {
-            val arr = try { JSONArray(s) } catch (_: JSONException) { return false }
+            val arr = try { JSONArray(s) } catch (_: Throwable) { return false }
             var any = false
             for (i in 0 until arr.length()) {
                 val obj = arr.optJSONObject(i) ?: continue
@@ -517,20 +544,27 @@ object LinkConverter {
         return false
     }
 
-    // --- Per-protocol link builders ---
     // VLESS: vnext/users plus reality/stream params
     private fun buildVless(ob: JSONObject, rem: String): String? {
-        val s = ob.optJSONObject("settings") ?: return null
-        val vnext = s.optJSONArray("vnext") ?: return null
-        if (vnext.length() == 0) return null
-        val vn = vnext.getJSONObject(0)
-        val users = vn.optJSONArray("users") ?: return null
-        if (users.length() == 0) return null
-        val u = users.getJSONObject(0)
-        val ss = ob.optJSONObject("streamSettings")
-        val rs = ss?.optJSONObject("realitySettings")
-        val enc = URLEncoder.encode(rem, "UTF-8").replace("+", "%20")
-        return "vless://${u.getString("id")}@${vn.getString("address")}:${vn.getInt("port")}?encryption=${u.optString("encryption","none")}&flow=${u.optString("flow","")}&fp=${rs?.optString("fingerprint","chrome")}&pbk=${rs?.optString("publicKey","")}&security=${ss?.optString("security","none")}&sid=${rs?.optString("shortId","")}&sni=${rs?.optString("serverName","")}&type=${ss?.optString("network","tcp")}#$enc"
+        return try {
+            val s = ob.optJSONObject("settings") ?: return null
+            val vnext = s.optJSONArray("vnext") ?: return null
+            if (vnext.length() == 0) return null
+            val vn = vnext.getJSONObject(0)
+            val users = vn.optJSONArray("users") ?: return null
+            if (users.length() == 0) return null
+            val u = users.getJSONObject(0)
+            val ss = ob.optJSONObject("streamSettings")
+            val rs = ss?.optJSONObject("realitySettings")
+            val enc = URLEncoder.encode(rem, "UTF-8").replace("+", "%20")
+            val fp = rs?.optString("fingerprint", "chrome") ?: "chrome"
+            val pbk = rs?.optString("publicKey", "") ?: ""
+            val sid = rs?.optString("shortId", "") ?: ""
+            val sni = rs?.optString("serverName", "") ?: ""
+            val security = ss?.optString("security", "none") ?: "none"
+            val type = ss?.optString("network", "tcp") ?: "tcp"
+            "vless://${u.getString("id")}@${vn.getString("address")}:${vn.getInt("port")}?encryption=${u.optString("encryption","none")}&flow=${u.optString("flow","")}&fp=$fp&pbk=$pbk&security=$security&sid=$sid&sni=$sni&type=$type#$enc"
+        } catch (_: Exception) { null }
     }
 
     // VMess: build the legacy JSON blob and base64 it
@@ -660,7 +694,7 @@ object LinkConverter {
 
             val ss = ob.optJSONObject("streamSettings")
             val hy2 = ss?.optJSONObject("hy2Settings")
-            val password = hy2?.optString("password")
+            val password = hy2?.optString("password") ?: ""
             val obfs = hy2?.optJSONObject("obfs")
             val obfsType = obfs?.optString("type")
             val obfsPassword = obfs?.optString("password")
@@ -669,9 +703,9 @@ object LinkConverter {
             val sni = tls?.optString("serverName")
 
             val query = StringBuilder()
-            if (!obfsType.isNullOrEmpty()) query.append("&obfs=").append(obfsType)
+            if (!obfsType.isNullOrEmpty()) query.append("&obfs=").append(URLEncoder.encode(obfsType, "UTF-8"))
             if (!obfsPassword.isNullOrEmpty()) query.append("&obfs-password=").append(URLEncoder.encode(obfsPassword, "UTF-8"))
-            if (!sni.isNullOrEmpty()) query.append("&sni=").append(sni)
+            if (!sni.isNullOrEmpty()) query.append("&sni=").append(URLEncoder.encode(sni, "UTF-8"))
 
             val queryString = if (query.isNotEmpty()) "?" + query.toString().substring(1) else ""
             val encRem = URLEncoder.encode(rem, "UTF-8").replace("+", "%20")

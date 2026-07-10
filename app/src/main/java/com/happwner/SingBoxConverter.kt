@@ -726,7 +726,7 @@ object SingBoxConverter {
         return HostPort(s, null)
     }
 
-    private fun normalizeFlow(flow: String?): String {
+    internal fun normalizeFlow(flow: String?): String {
         if (flow.isNullOrEmpty()) return ""
         return VLESS_FLOW_MAP[flow] ?: flow
     }
@@ -2205,7 +2205,7 @@ object SingBoxConverter {
         val existingTags = HashSet<String>(proxyTags)
         for (b in balancerOuts) existingTags.add(b.optString("tag", ""))
         for (a in auxOuts) existingTags.add(a.optString("tag", ""))
-        while (selectorTag in existingTags) selectorTag += " ⊙"
+        while (selectorTag in existingTags) selectorTag += " \u2299"
 
         var selector: JSONObject? = null
         val needSelector = proxyTags.size > 1 || balancerOuts.isNotEmpty()

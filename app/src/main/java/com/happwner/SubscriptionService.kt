@@ -260,7 +260,6 @@ class SubscriptionService : Service() {
                             }
 
                             Log.d("Happwner:Server", "Sending response back. Final length: ${finalBody.length}")
-                            Log.v("Happwner:Server", "Response content: $finalBody")
 
                             sendResponse(output, finalBody, response.headers)
                         } else {
@@ -270,7 +269,7 @@ class SubscriptionService : Service() {
                         sendError(output, 404, "Not Found")
                     }
                 }
-            } catch (e: Exception) {
+            } catch (e: Throwable) {
                 Log.e("Happwner:Server", "Error handling client: ${e.message}")
             } finally {
                 try {
@@ -328,7 +327,7 @@ class SubscriptionService : Service() {
             conn.apply {
                 requestMethod = "GET"
                 setRequestProperty("x-hwid", hwid)
-                setRequestProperty("User-Agent", ua)
+                if (ua.isNotBlank()) setRequestProperty("User-Agent", ua)
                 connectTimeout = 15000 // 15s
                 readTimeout = 15000 // 15s
             }

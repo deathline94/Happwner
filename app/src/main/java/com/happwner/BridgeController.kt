@@ -57,7 +57,7 @@ object BridgeController {
     fun notifyChanged(context: Context) {
         val app = context.applicationContext
         try {
-            app.sendBroadcast(Intent("${app.packageName}.REFRESH_UI"))
+            app.sendBroadcast(Intent("${app.packageName}.REFRESH_UI").setPackage(app.packageName))
         } catch (_: Throwable) {
         }
         refreshSurfaces(app)

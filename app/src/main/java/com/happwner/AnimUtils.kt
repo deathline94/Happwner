@@ -22,6 +22,9 @@ import android.view.Window
 import android.view.WindowManager
 import android.view.animation.Interpolator
 import android.view.animation.PathInterpolator
+import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.shape.MaterialShapeDrawable
@@ -878,4 +881,72 @@ fun View.crossfadeContent(onEnd: (() -> Unit)? = null, action: () -> Unit) {
             onEnd?.invoke()
         }
         .start()
+}
+
+// Build a color with a replaced alpha channel (fades text without touching the field box)
+fun colorWithAlpha(color: Int, alpha: Int): Int =
+    Color.argb(alpha, Color.red(color), Color.green(color), Color.blue(color))
+
+// True crossfade of an EditText's text: one standard-duration animator fades the old text out and
+// the new text in at the same time. Only the text animates -- the field border/background stays put.
+fun EditText.crossfadeText(newText: CharSequence, onComplete: (() -> Unit)? = null) {
+    val field = this
+    val oldText = field.text?.toString() ?: ""
+    val host = field.parent as? ViewGroup
+    if (field.context.skipProgrammaticAnimations() || oldText == newText.toString() || host == null ||
+        field.width == 0 || field.height == 0) {
+        field.setText(newText)
+        onComplete?.invoke()
+        return
+    }
+    (field.getTag(R.id.tag_ua_crossfade) as? ValueAnimator)?.cancel()
+    (field.getTag(R.id.tag_ua_overlay) as? View)?.let { host.removeView(it) }
+
+    val baseColor = field.currentTextColor
+    val overlay = TextView(field.context).apply {
+        text = oldText
+        setTextSize(TypedValue.COMPLEX_UNIT_PX, field.textSize)
+        typeface = field.typeface
+        setTextColor(baseColor)
+        gravity = field.gravity
+        maxLines = field.maxLines
+        includeFontPadding = field.includeFontPadding
+        setPadding(field.paddingLeft, field.paddingTop, field.paddingRight, field.paddingBottom)
+        isClickable = false
+        isFocusable = false
+    }
+    val lp = FrameLayout.LayoutParams(field.width, field.height)
+    lp.leftMargin = field.left
+    lp.topMargin = field.top
+    host.addView(overlay, lp)
+    field.setTag(R.id.tag_ua_overlay, overlay)
+
+    field.setText(newText)
+    field.setTextColor(colorWithAlpha(baseColor, 0))
+
+    val cleanup = {
+        field.setTextColor(baseColor)
+        host.removeView(overlay)
+        field.setTag(R.id.tag_ua_overlay, null)
+        field.setTag(R.id.tag_ua_crossfade, null)
+    }
+    val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+        duration = field.resources.getInteger(R.integer.duration_standard_transition).toLong()
+        addUpdateListener { anim ->
+            val p = anim.animatedFraction
+            overlay.alpha = 1f - p
+            field.setTextColor(colorWithAlpha(baseColor, (p * 255f).toInt()))
+        }
+        addListener(object : AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: Animator) {
+                cleanup()
+                onComplete?.invoke()
+            }
+            override fun onAnimationCancel(animation: Animator) {
+                cleanup()
+            }
+        })
+    }
+    field.setTag(R.id.tag_ua_crossfade, animator)
+    animator.start()
 }

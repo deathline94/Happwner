@@ -25,20 +25,31 @@ class MainHook : IXposedHookLoadPackage {
         @Volatile private var cachedId: String? = null
         @Volatile private var isEnabled: Boolean = false
         @Volatile private var isInterceptEnabled: Boolean = false
-        @Volatile private var isHappUnlockHookEnabled: Boolean = false
+        @Volatile private var isUnlockHookEnabled: Boolean = false
+
+        // Real (un-spoofed) ANDROID_ID, captured from settings reads, used to recognise HWID labels
+        @Volatile private var realAndroidId: String? = null
+        // TextViews showing the HWID, kept with a template + case flag so we can refresh them when the spoof changes
+        private val hwidViews = java.util.Collections.synchronizedList(mutableListOf<Triple<java.lang.ref.WeakReference<Any>, String, Boolean>>())
+        private const val HWID_MARKER = "\u0000HWID\u0000"
 
         private var isInitialized = false
+        private val incyHwidHooked = java.util.concurrent.atomic.AtomicBoolean(false)
+        private val incyHwidCaptured = java.util.concurrent.atomic.AtomicBoolean(false)
         private val lock = Any()
 
         private val unlockStateLock = Any()
         private val unlockStateObservers = java.util.Collections.synchronizedList(mutableListOf<(Boolean) -> Unit>())
 
+        // Live v2RayTun RecyclerViews (weak refs) so a runtime toggle can re-bind their rows
+        private val v2rayRecyclers = java.util.Collections.synchronizedList(mutableListOf<java.lang.ref.WeakReference<Any>>())
+
         // Set the unlock flag and notify observers if it changed
-        private fun applyHappUnlockEnabled(enabled: Boolean) {
+        private fun applyUnlockEnabled(enabled: Boolean) {
             val toFire: List<(Boolean) -> Unit>
             synchronized(unlockStateLock) {
-                if (isHappUnlockHookEnabled == enabled) return
-                isHappUnlockHookEnabled = enabled
+                if (isUnlockHookEnabled == enabled) return
+                isUnlockHookEnabled = enabled
                 toFire = synchronized(unlockStateObservers) { unlockStateObservers.toList() }
             }
             for (o in toFire) {
@@ -48,6 +59,8 @@ class MainHook : IXposedHookLoadPackage {
 
         // Debug helper: log a message with a trimmed stack trace
         fun logTrace(message: String) {
+            // Debug builds only: skip building the trace on every settings read
+            if (!BuildConfig.DEBUG) return
             val stackTrace = Thread.currentThread().stackTrace
                 .drop(3)
                 .take(8)
@@ -105,9 +118,11 @@ class MainHook : IXposedHookLoadPackage {
                 val name = param.args[1] as? String
                 if (name == Settings.Secure.ANDROID_ID) {
                     val originalId = param.result as? String
-                    if (!originalId.isNullOrEmpty() && originalId != cachedId) {
-                        val resolver = param.args[0] as? ContentResolver
-                        sendIdCapturedBroadcast(resolver, originalId)
+                    if (!originalId.isNullOrEmpty()) {
+                        realAndroidId = originalId
+                        if (originalId != cachedId) {
+                            sendIdCapturedBroadcast(originalId)
+                        }
                     }
 
                     ensureCacheInitialized(param.args[0] as? ContentResolver)
@@ -140,9 +155,11 @@ class MainHook : IXposedHookLoadPackage {
                         val name = param.args[1] as? String
                         if (name == Settings.Secure.ANDROID_ID) {
                             val originalId = param.result as? String
-                            if (!originalId.isNullOrEmpty() && originalId != cachedId) {
-                                val resolver = param.args[0] as? ContentResolver
-                                sendIdCapturedBroadcast(resolver, originalId)
+                            if (!originalId.isNullOrEmpty()) {
+                                realAndroidId = originalId
+                                if (originalId != cachedId) {
+                                    sendIdCapturedBroadcast(originalId)
+                                }
                             }
 
                             ensureCacheInitialized(param.args[0] as? ContentResolver)
@@ -190,6 +207,63 @@ class MainHook : IXposedHookLoadPackage {
 
         // 6. Optional: unlock the hidden Happ settings
         hookHideSettings(lpparam.classLoader)
+
+        // 7. Optional: unlock v2RayTun encrypted subscriptions (only fires if its class is present)
+        hookV2RayTunUnlock(lpparam.classLoader)
+
+        // 8. Keep the on-screen HWID label in sync with the spoof without a restart (Happ only)
+        hookHwidLabels(lpparam.classLoader, lpparam.packageName)
+
+        // 9. INCY: force our HWID, finding the method via its encrypted-cache read (survives obfuscation)
+        if (lpparam.packageName == "llc.itdev.incy") hookIncyHwid(lpparam.classLoader)
+    }
+
+    // INCY: find the HWID getter from its cached-UUID read (survives obfuscation), mirror that HWID to the field, and force our value
+    private fun hookIncyHwid(classLoader: ClassLoader) {
+        val hwidShape = Regex("^[0-9A-Fa-f]{8}(-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}$")
+        val skip = arrayOf(
+            "android.", "androidx.", "java.", "javax.", "kotlin.", "kotlinx.", "dalvik.", "sun.", "libcore.",
+            "com.android.", "de.robv.android.xposed.", "org.lsposed.", "com.happwner."
+        )
+        val probes = mutableListOf<XC_MethodHook.Unhook>()
+        val onCacheRead = object : XC_MethodHook() {
+            override fun afterHookedMethod(param: MethodHookParam) {
+                if (incyHwidHooked.get()) return
+                val value = param.result as? String ?: return
+                if (!hwidShape.matches(value)) return
+                // value is INCY's full HWID (its cached UUID); mirror it into the input field once per launch
+                if (incyHwidCaptured.compareAndSet(false, true)) sendIdCapturedBroadcast(value)
+                // the no-arg String method that read it is INCY's HWID getter
+                val method = Thread.currentThread().stackTrace.asSequence()
+                    .filter { fr -> skip.none { fr.className.startsWith(it) } }
+                    .mapNotNull { fr ->
+                        try {
+                            Class.forName(fr.className, false, classLoader).declaredMethods
+                                .firstOrNull { it.name == fr.methodName && it.parameterTypes.isEmpty() && it.returnType == String::class.java }
+                        } catch (e: Throwable) { null }
+                    }
+                    .firstOrNull() ?: return
+                if (!incyHwidHooked.compareAndSet(false, true)) return
+                XposedBridge.hookMethod(method, object : XC_MethodHook() {
+                    override fun afterHookedMethod(p: MethodHookParam) {
+                        if (isEnabled && !cachedId.isNullOrEmpty()) {
+                            logTrace("INCY: forced HWID -> $cachedId")
+                            p.result = cachedId
+                        }
+                    }
+                })
+                probes.forEach { try { it.unhook() } catch (_: Throwable) {} }
+                Log.d(TAG, "INCY: HWID hook on ${method.declaringClass.name}.${method.name}")
+            }
+        }
+        val prefImpls = arrayOf("androidx.security.crypto.EncryptedSharedPreferences", "android.app.SharedPreferencesImpl")
+        for (cls in prefImpls) {
+            try {
+                probes.add(XposedHelpers.findAndHookMethod(cls, classLoader, "getString", String::class.java, String::class.java, onCacheRead))
+            } catch (e: Throwable) {
+                Log.e(TAG, "INCY: cannot hook $cls.getString: ${e.message}")
+            }
+        }
     }
 
     // Clear Happ's _hideSettings via a behavioral probe, without hardcoding method names
@@ -238,7 +312,7 @@ class MainHook : IXposedHookLoadPackage {
         // On the first instance: probe for the getter, then hook it per the toggle
         val ctorHook = object : XC_MethodHook() {
             override fun afterHookedMethod(param: MethodHookParam) {
-                if (!isHappUnlockHookEnabled) return
+                if (!isUnlockHookEnabled) return
                 if (!probed.compareAndSet(false, true)) return
                 val probe = param.thisObject ?: run { probed.set(false); return }
                 try {
@@ -272,11 +346,11 @@ class MainHook : IXposedHookLoadPackage {
 
                     // React to a settings toggle being flipped at runtime
                     val observer: (Boolean) -> Unit = { _ ->
-                        if (isHappUnlockHookEnabled) applyPatches() else removePatches()
+                        if (isUnlockHookEnabled) applyPatches() else removePatches()
                     }
                     synchronized(unlockStateLock) {
                         synchronized(unlockStateObservers) { unlockStateObservers.add(observer) }
-                        if (isHappUnlockHookEnabled) applyPatches() else removePatches()
+                        if (isUnlockHookEnabled) applyPatches() else removePatches()
                     }
                 } catch (e: Throwable) {
                     Log.e(TAG, "hookHideSettings probe: ${e.message}")
@@ -292,6 +366,143 @@ class MainHook : IXposedHookLoadPackage {
         // Hook every constructor so we can probe the first instance
         for (ctor in clazz.declaredConstructors) {
             try { ctorUnhooks.add(XposedBridge.hookMethod(ctor, ctorHook)) } catch (e: Throwable) {}
+        }
+    }
+
+    // Unlock v2RayTun: both SubscriptionItem and ConfigItem carry an isEncoded flag that hides share/edit UI
+    private fun hookV2RayTunUnlock(classLoader: ClassLoader) {
+        hookV2RayTunEncodedFlag(classLoader, "com.v2raytun.android.model.SubscriptionItem")
+        hookV2RayTunEncodedFlag(classLoader, "com.v2raytun.android.model.ConfigItem")
+        if (XposedHelpers.findClassIfExists("com.v2raytun.android.model.ConfigItem", classLoader) == null) return
+        collectV2RayRecyclers(classLoader)
+        // One refresh observer (added after both getter hooks) re-binds lists once per toggle, not per class
+        val refreshObserver: (Boolean) -> Unit = { _ -> refreshV2RayLists() }
+        synchronized(unlockStateObservers) { unlockStateObservers.add(refreshObserver) }
+    }
+
+    // Track live RecyclerViews so a runtime toggle can re-bind rows (the getter hook alone won't re-bind cached rows)
+    private fun collectV2RayRecyclers(classLoader: ClassLoader) {
+        val rvClass = XposedHelpers.findClassIfExists("androidx.recyclerview.widget.RecyclerView", classLoader) ?: return
+        try {
+            XposedBridge.hookAllMethods(rvClass, "setAdapter", object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    val rv = param.thisObject ?: return
+                    synchronized(v2rayRecyclers) {
+                        v2rayRecyclers.removeAll { it.get() == null || it.get() === rv }
+                        v2rayRecyclers.add(java.lang.ref.WeakReference(rv))
+                    }
+                }
+            })
+        } catch (_: Throwable) {}
+    }
+
+    // Re-bind all known RecyclerViews on the UI thread so toggling the hook updates visible rows
+    private fun refreshV2RayLists() {
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        synchronized(v2rayRecyclers) {
+            val iter = v2rayRecyclers.iterator()
+            while (iter.hasNext()) {
+                val rv = iter.next().get()
+                if (rv == null) { iter.remove(); continue }
+                handler.post {
+                    try {
+                        val adapter = XposedHelpers.callMethod(rv, "getAdapter")
+                        if (adapter != null) XposedHelpers.callMethod(adapter, "notifyDataSetChanged")
+                    } catch (_: Throwable) {}
+                }
+            }
+        }
+    }
+
+    // Track HWID-showing TextViews so we can refresh them when the spoof changes (apps set them once on screen build)
+    private fun hookHwidLabels(classLoader: ClassLoader, currentPackage: String) {
+        // The HWID label lives in Happ and v2RayTun; v2RayTun shows it upper-cased, Happ as-is
+        if (currentPackage != "com.happproxy" && currentPackage != "su.happ.proxyutility" && currentPackage != "com.v2raytun.android") return
+        val tvClass = XposedHelpers.findClassIfExists("android.widget.TextView", classLoader) ?: return
+        try {
+            XposedBridge.hookAllMethods(tvClass, "setText", object : XC_MethodHook() {
+                override fun afterHookedMethod(param: MethodHookParam) {
+                    val tv = param.thisObject ?: return
+                    val text = try { XposedHelpers.callMethod(tv, "getText")?.toString() } catch (_: Throwable) { null } ?: return
+                    val cid = cachedId
+                    val rid = realAndroidId
+                    // A HWID label contains our spoofed id or the real ANDROID_ID, in lower or upper case
+                    val match: Pair<String, Boolean>? = when {
+                        !cid.isNullOrEmpty() && text.contains(cid) -> cid to false
+                        !cid.isNullOrEmpty() && text.contains(cid.uppercase()) -> cid.uppercase() to true
+                        !rid.isNullOrEmpty() && text.contains(rid) -> rid to false
+                        !rid.isNullOrEmpty() && text.contains(rid.uppercase()) -> rid.uppercase() to true
+                        else -> null
+                    }
+                    val (matchedId, isUpper) = match ?: return
+                    val template = text.replace(matchedId, HWID_MARKER)
+                    synchronized(hwidViews) {
+                        hwidViews.removeAll { it.first.get() == null || it.first.get() === tv }
+                        hwidViews.add(Triple(java.lang.ref.WeakReference<Any>(tv), template, isUpper))
+                    }
+                }
+            })
+        } catch (_: Throwable) {}
+    }
+
+    // Re-set the HWID text on the UI thread so the label matches the current spoof state without a restart
+    private fun refreshHwidViews() {
+        val baseId = (if (isEnabled) cachedId else realAndroidId)?.takeIf { it.isNotEmpty() } ?: return
+        val handler = android.os.Handler(android.os.Looper.getMainLooper())
+        synchronized(hwidViews) {
+            val iter = hwidViews.iterator()
+            while (iter.hasNext()) {
+                val entry = iter.next()
+                val tv = entry.first.get()
+                if (tv == null) { iter.remove(); continue }
+                val newId = if (entry.third) baseId.uppercase() else baseId
+                val newText = entry.second.replace(HWID_MARKER, newId)
+                handler.post {
+                    try { XposedHelpers.callMethod(tv, "setText", newText) } catch (_: Throwable) {}
+                }
+            }
+        }
+    }
+
+    // Force a v2RayTun model's isEncoded() getter to return false (UI reads it to hide edit/share)
+    private fun hookV2RayTunEncodedFlag(classLoader: ClassLoader, className: String) {
+        val clazz = XposedHelpers.findClassIfExists(className, classLoader) ?: return
+
+        // UI reads isEncoded() to hide edit/share; hook the getter directly so it applies at class load
+        val getter = try { clazz.getDeclaredMethod("isEncoded") } catch (e: Throwable) { return }
+        if (getter.returnType != java.lang.Boolean.TYPE) return
+
+        val patchLock = Any()
+        val activeUnhooks = mutableListOf<XC_MethodHook.Unhook>()
+
+        // Force the getter to return false
+        val applyPatches = {
+            synchronized(patchLock) {
+                if (activeUnhooks.isEmpty()) {
+                    try {
+                        activeUnhooks.add(XposedBridge.hookMethod(getter, XC_MethodReplacement.returnConstant(false)))
+                    } catch (_: Throwable) {}
+                }
+            }
+        }
+
+        // Undo the hook
+        val removePatches = {
+            synchronized(patchLock) {
+                for (uh in activeUnhooks) {
+                    try { uh.unhook() } catch (_: Throwable) {}
+                }
+                activeUnhooks.clear()
+            }
+        }
+
+        // Apply now per the toggle and react to runtime changes
+        val observer: (Boolean) -> Unit = { _ ->
+            if (isUnlockHookEnabled) applyPatches() else removePatches()
+        }
+        synchronized(unlockStateLock) {
+            synchronized(unlockStateObservers) { unlockStateObservers.add(observer) }
+            if (isUnlockHookEnabled) applyPatches() else removePatches()
         }
     }
 
@@ -348,23 +559,6 @@ class MainHook : IXposedHookLoadPackage {
         return null
     }
 
-    // Tell the app the real android_id we observed (for history/UI)
-    private fun sendIdCapturedBroadcast(resolver: ContentResolver?, originalId: String) {
-        if (originalId.isEmpty()) return
-        try {
-            val context = (XposedHelpers.callStaticMethod(XposedHelpers.findClass("android.app.ActivityThread", null), "currentActivityThread") as? Any)
-                ?.let { XposedHelpers.callMethod(it, "getApplication") as? Context }
-                ?: return
-
-            val intent = Intent("${MODULE_PACKAGE}.ID_CAPTURED").apply {
-                setPackage(MODULE_PACKAGE)
-                putExtra("original_id", originalId)
-                addFlags(0x01000000) // FLAG_RECEIVER_INCLUDE_BACKGROUND
-            }
-            context.sendBroadcast(intent)
-        } catch (e: Exception) {}
-    }
-
     // Cursor that swaps android_id's value and type for the spoofed id
     private class SettingsCursorWrapper(cursor: Cursor, private val spoofedId: String?, private val currentPackage: String) : CursorWrapper(cursor) {
         private val nameIdx by lazy {
@@ -390,21 +584,6 @@ class MainHook : IXposedHookLoadPackage {
                 } catch (e: Exception) {}
             }
             return originalValue
-        }
-
-        private fun sendIdCapturedBroadcast(originalId: String) {
-            try {
-                val context = (XposedHelpers.callStaticMethod(XposedHelpers.findClass("android.app.ActivityThread", null), "currentActivityThread") as? Any)
-                    ?.let { XposedHelpers.callMethod(it, "getApplication") as? Context }
-                    ?: return
-
-                val intent = Intent("com.happwner.ID_CAPTURED").apply {
-                    setPackage("com.happwner")
-                    putExtra("original_id", originalId)
-                    addFlags(0x01000000) // FLAG_RECEIVER_INCLUDE_BACKGROUND
-                }
-                context.sendBroadcast(intent)
-            } catch (e: Exception) {}
         }
 
         override fun getType(columnIndex: Int): Int {
@@ -443,8 +622,9 @@ class MainHook : IXposedHookLoadPackage {
                 cachedId = bundle.getString("custom_hwid")
                 isEnabled = bundle.getBoolean("use_custom_hwid_substitution", false)
                 isInterceptEnabled = bundle.getBoolean("intercept_enabled", false)
-                applyHappUnlockEnabled(bundle.getBoolean("hook_happ_unlock_settings", false))
-                Log.d(TAG, "Cache initialized via Provider: ID=$cachedId, Spoof=$isEnabled, Unlock=$isHappUnlockHookEnabled")
+                applyUnlockEnabled(bundle.getBoolean("hook_happ_unlock_settings", false))
+                Log.d(TAG, "Cache initialized via Provider: ID=$cachedId, Spoof=$isEnabled, Unlock=$isUnlockHookEnabled")
+                refreshHwidViews()
             }
         } catch (e: Exception) {
             Log.e(TAG, "Provider unreachable (Package Visibility issue?): ${e.message}")
@@ -462,8 +642,9 @@ class MainHook : IXposedHookLoadPackage {
                     cachedId = intent.getStringExtra("custom_hwid")
                     isEnabled = intent.getBooleanExtra("use_custom_hwid_substitution", false)
                     isInterceptEnabled = intent.getBooleanExtra("intercept_enabled", false)
-                    applyHappUnlockEnabled(intent.getBooleanExtra("hook_happ_unlock_settings", false))
-                    Log.d(TAG, "RAM Cache updated via Broadcast: ID=$cachedId, Spoof=$isEnabled, Unlock=$isHappUnlockHookEnabled")
+                    applyUnlockEnabled(intent.getBooleanExtra("hook_happ_unlock_settings", false))
+                    Log.d(TAG, "RAM Cache updated via Broadcast: ID=$cachedId, Spoof=$isEnabled, Unlock=$isUnlockHookEnabled")
+                    refreshHwidViews()
                 } else {
 
                     initCache(context)
@@ -487,4 +668,21 @@ class MainHook : IXposedHookLoadPackage {
             } catch (e: Exception) {}
         }.start()
     }
+}
+
+// Tell the app the real android_id we observed (for history/UI)
+private fun sendIdCapturedBroadcast(originalId: String) {
+    if (originalId.isEmpty()) return
+    try {
+        val context = (XposedHelpers.callStaticMethod(XposedHelpers.findClass("android.app.ActivityThread", null), "currentActivityThread") as? Any)
+            ?.let { XposedHelpers.callMethod(it, "getApplication") as? Context }
+            ?: return
+
+        val intent = Intent("com.happwner.ID_CAPTURED").apply {
+            setPackage("com.happwner")
+            putExtra("original_id", originalId)
+            addFlags(0x01000000) // FLAG_RECEIVER_INCLUDE_BACKGROUND
+        }
+        context.sendBroadcast(intent)
+    } catch (e: Exception) {}
 }

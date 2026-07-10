@@ -29,7 +29,7 @@ class LSPatchReceiver : BroadcastReceiver() {
             val prefs = PrefsManager.getSafePrefs(context)
             val apps = prefs.getStringSet("lspatch_apps", mutableSetOf())?.toMutableSet() ?: mutableSetOf()
             val sigMapJson = prefs.getString("lspatch_signatures", "{}") ?: "{}"
-            val sigMap = JSONObject(sigMapJson)
+            val sigMap = try { JSONObject(sigMapJson) } catch (_: Throwable) { JSONObject() }
 
             // Important: keep the signature CRC32, otherwise MainActivity drops the app from the list
             val crc = PrefsManager.getSignatureCrc32(context, pkg)
@@ -67,7 +67,7 @@ class LSPatchReceiver : BroadcastReceiver() {
             editor.apply()
 
             // Tell MainActivity to refresh the UI
-            context.sendBroadcast(Intent("${context.packageName}.REFRESH_UI"))
+            context.sendBroadcast(Intent("${context.packageName}.REFRESH_UI").setPackage(context.packageName))
             Log.d("Happwner:LSP", "Sent REFRESH_UI broadcast")
 
             // Send the settings back in the reply

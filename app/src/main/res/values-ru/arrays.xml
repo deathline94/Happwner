@@ -24,9 +24,4 @@
         <item>Русский</item>
         <item>English</item>
     </string-array>
-
-    <string-array name="xposed_scope">
-        <item>com.happproxy</item>
-        <item>su.happ.proxyutility</item>
-    </string-array>
 </resources>

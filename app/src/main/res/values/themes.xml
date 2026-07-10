@@ -96,9 +96,7 @@
         <item name="android:paddingRight">@dimen/dialog_btn_hitbox_horizontal</item>
     </style>
 
-    <style name="Widget_Happwner_Button_TextButton" parent="Widget.MaterialComponents.Button.TextButton">
-        <item name="android:textColor">?attr/happAccent</item>
-    </style>
+    <style name="Widget_Happwner_Button_TextButton" parent="Widget_Happwner_Button_DialogPositive" />
 
     <style name="ThemeOverlay_Happwner_Toolbar" parent="ThemeOverlay.MaterialComponents.ActionBar">
         <item name="colorControlNormal">@color/toolbar_text</item>

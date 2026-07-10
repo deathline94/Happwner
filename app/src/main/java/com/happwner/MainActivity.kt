@@ -7,9 +7,12 @@ import android.os.Build
 import android.os.Bundle
 import android.text.Html
 import android.text.InputFilter
+import android.text.Spannable
 import android.text.SpannableStringBuilder
 import android.text.Spanned
+import android.text.TextPaint
 import android.text.TextUtils
+import android.text.style.ClickableSpan
 import android.text.style.ForegroundColorSpan
 import android.transition.ChangeBounds
 import android.transition.Fade
@@ -18,6 +21,7 @@ import android.transition.TransitionSet
 import android.util.Log
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewTreeObserver
 import android.view.WindowManager
 import android.view.inputmethod.InputMethodManager
 import android.widget.*
@@ -28,10 +32,12 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.ContextCompat
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.core.text.PrecomputedTextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsAnimationCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.widget.TextViewCompat
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import com.google.android.material.color.MaterialColors
@@ -84,6 +90,11 @@ class MainActivity : AppCompatActivity() {
     private var pendingHintAnimAfterImeClose: Boolean = false
 
     private lateinit var output: TextView
+    private lateinit var outputWaitLabel: TextView
+    private var outputExpanding = false
+    private var blockOutputTouch = false
+    private var outputExpandAborted = false
+    private var expandJob: kotlinx.coroutines.Job? = null
     private lateinit var btnGetSub: Button
     private lateinit var btnPasteUrlManual: ImageButton
 
@@ -312,6 +323,10 @@ class MainActivity : AppCompatActivity() {
         layoutUserAgent = findViewById(R.id.layoutUserAgent)
         urlErrorText = findViewById(R.id.urlErrorText)
         output = findViewById(R.id.output)
+        outputWaitLabel = findViewById(R.id.outputWaitLabel)
+        // Swallow touches on the result only while the wait label is shown, so the invisible text can't be selected
+        output.setOnTouchListener { _, _ -> blockOutputTouch }
+        (findViewById<View>(R.id.mainScrollView) as? NoAutoScrollView)?.selectionView = output
         btnGetSub = findViewById(R.id.btnGetSub)
         btnPasteUrlManual = findViewById(R.id.btnPasteUrlManual)
         val button = findViewById<Button>(R.id.btnGet)
@@ -352,7 +367,7 @@ class MainActivity : AppCompatActivity() {
                 handlePasteHwid()
             }
         }
-        btnEditUaManual.setOnClickListener { handleToggleUaEdit(!inputUserAgent.isEnabled) }
+        btnEditUaManual.setOnClickListener { showUaSelectDialog() }
 
         val blockEnterFilter = InputFilter { source, _, _, _, _, _ ->
             source.toString().replace("\n", "").replace("\r", "")
@@ -393,8 +408,8 @@ class MainActivity : AppCompatActivity() {
                 prefs.edit().putString("last_url", text).apply()
                 updateUrlActionIcon(text)
 
-                val isEncrypted = text.startsWith("happ://crypt")
-                val isAddLink = text.startsWith("happ://add/")
+                val isEncrypted = text.startsWith("happ://crypt") || text.startsWith("v2raytun://crypt")
+                val isAddLink = text.startsWith("happ://add/") || V2RayTunCrypto.isImportLink(text) || IncyLinks.isIncyLink(text)
                 val hasError = !text.isEmpty() && !isEncrypted && !isAddLink && !text.startsWith("http://") && !text.startsWith("https://")
                 val currentLineCount = inputUrl.lineCount
 
@@ -450,9 +465,7 @@ class MainActivity : AppCompatActivity() {
             private var lastLineCount = 1
 
             override fun afterTextChanged(s: android.text.Editable?) {
-                if (inputUserAgent.isEnabled) {
-                    prefs.edit().putString("custom_user_agent", s.toString()).apply()
-                }
+                prefs.edit().putString("custom_user_agent", s.toString()).apply()
                 val currentLineCount = inputUserAgent.lineCount
                 if (currentLineCount != lastLineCount) {
                     val transitionDurationMs = resources.getInteger(R.integer.duration_fast_transition).toLong()
@@ -496,6 +509,11 @@ class MainActivity : AppCompatActivity() {
         // Collapse / expand the output section
         outputHeader.setOnClickListener {
             currentFocus?.clearFocus()
+            outputExpandAborted = true
+            expandJob?.cancel()
+            output.animate().cancel()
+            output.alpha = 1f
+            hideWaitLabel()
             mainContainer.beginAdaptiveToggleTransition(output, R.id.hwidHint)
             if (output.visibility == View.VISIBLE) {
                 output.visibility = View.GONE
@@ -504,6 +522,8 @@ class MainActivity : AppCompatActivity() {
                 output.visibility = View.VISIBLE
                 btnExpandOutput.setImageResource(R.drawable.ic_expand_less)
             }
+            // Collapsing the result falls back to the stock scrollbar; expanding a large one restores the custom thumb
+            applyOutputScrollbar()
         }
 
         // Clear the captured-URL history
@@ -532,8 +552,15 @@ class MainActivity : AppCompatActivity() {
         btnClearOutput.setOnClickListener {
             mainContainer.beginDelayedTransitionIfEnabled(fastTransition)
             fullResponseText = ""
+            outputExpandAborted = true
+            expandJob?.cancel()
+            outputExpanding = false
+            output.animate().cancel()
+            output.alpha = 1f
+            hideWaitLabel()
             setHtmlText(output, R.string.label_result_default)
             output.setTextIsSelectable(false)
+            applyOutputScrollbar()
             if (output.visibility == View.VISIBLE) {
                 output.visibility = View.GONE
                 btnExpandOutput.setImageResource(R.drawable.ic_expand_more)
@@ -561,12 +588,37 @@ class MainActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
 
+            if (urlString.startsWith("v2raytun://crypt")) {
+                Toast.makeText(this, getString(R.string.error_decrypt_first), Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
             if (HappCrypto.extractEmbeddedHappLink(urlString) != null) {
                 Toast.makeText(this, getString(R.string.error_convert_first), Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
 
+            if (V2RayTunCrypto.extractEmbeddedV2RayLink(urlString) != null) {
+                Toast.makeText(this, getString(R.string.error_convert_first), Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            if (IncyLinks.extractEmbeddedIncyLink(urlString) != null) {
+                Toast.makeText(this, getString(R.string.error_convert_first), Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
             if (urlString.startsWith("happ://add/")) {
+                Toast.makeText(this, getString(R.string.error_convert_first), Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            if (V2RayTunCrypto.isImportLink(urlString)) {
+                Toast.makeText(this, getString(R.string.error_convert_first), Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            if (IncyLinks.isIncyLink(urlString)) {
                 Toast.makeText(this, getString(R.string.error_convert_first), Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
@@ -656,12 +708,37 @@ class MainActivity : AppCompatActivity() {
                 return@setOnClickListener
             }
 
+            if (urlString.startsWith("v2raytun://crypt")) {
+                Toast.makeText(this, getString(R.string.error_decrypt_first), Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
             if (HappCrypto.extractEmbeddedHappLink(urlString) != null) {
                 Toast.makeText(this, getString(R.string.error_convert_first), Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
 
+            if (V2RayTunCrypto.extractEmbeddedV2RayLink(urlString) != null) {
+                Toast.makeText(this, getString(R.string.error_convert_first), Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            if (IncyLinks.extractEmbeddedIncyLink(urlString) != null) {
+                Toast.makeText(this, getString(R.string.error_convert_first), Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
             if (urlString.startsWith("happ://add/")) {
+                Toast.makeText(this, getString(R.string.error_convert_first), Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            if (V2RayTunCrypto.isImportLink(urlString)) {
+                Toast.makeText(this, getString(R.string.error_convert_first), Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+
+            if (IncyLinks.isIncyLink(urlString)) {
                 Toast.makeText(this, getString(R.string.error_convert_first), Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
@@ -680,6 +757,10 @@ class MainActivity : AppCompatActivity() {
             pendingConfigText = null
             loadingPhaseRunning = true
             fullResponseText = ""
+            outputExpandAborted = true
+            expandJob?.cancel()
+            outputExpanding = false
+            hideWaitLabel()
 
             output.crossfadeContent(onEnd = {
                 if (gen != fetchGeneration) return@crossfadeContent
@@ -687,20 +768,14 @@ class MainActivity : AppCompatActivity() {
                 val pending = pendingConfigText
                 if (pending != null) {
                     pendingConfigText = null
-                    output.crossfadeContent {
-                        output.visibility = View.VISIBLE
-                        btnExpandOutput.setImageResource(R.drawable.ic_expand_less)
-                        output.text = pending
-                        if (!output.isTextSelectable) {
-                            output.setTextIsSelectable(true)
-                        }
-                    }
+                    output.crossfadeContent { showOutputText(pending) }
                 }
             }) {
                 output.visibility = View.VISIBLE
                 btnExpandOutput.setImageResource(R.drawable.ic_expand_less)
                 output.text = getString(R.string.msg_loading)
                 output.setTextIsSelectable(false)
+                applyOutputScrollbar()
             }
 
             // Off the main thread: fetch, decrypt, convert, then render with labels
@@ -730,39 +805,55 @@ class MainActivity : AppCompatActivity() {
                 val converted = stats.text
                 val xraySkipped = stats.xraySkipped
 
-                val displayedBody = if (converted.length > MAX_DISPLAY_CHARS) {
-                    converted.take(MAX_DISPLAY_CHARS) + getString(R.string.msg_text_truncated)
-                } else {
-                    converted
-                }
+                val isTruncated = converted.length > MAX_DISPLAY_CHARS
+                val accent = MaterialColors.getColor(
+                    this@MainActivity, R.attr.happAccent,
+                    ContextCompat.getColor(this@MainActivity, R.color.brand_purple_secondary)
+                )
 
-                // Prefix the '[Decrypted]' / skipped-count labels when relevant
-                val newText: CharSequence = if (wasDecrypted || xraySkipped > 0) {
-                    val accent = MaterialColors.getColor(
-                        this@MainActivity, R.attr.happAccent,
-                        ContextCompat.getColor(this@MainActivity, R.color.brand_purple_secondary)
-                    )
-                    val decryptedLabel = if (wasDecrypted) getString(R.string.msg_decrypted) else null
-                    val skipLabel = if (xraySkipped > 0) {
-                        resources.getQuantityString(R.plurals.msg_xray_skipped, xraySkipped, xraySkipped)
-                    } else null
-                    SpannableStringBuilder().apply {
-                        if (decryptedLabel != null) {
-                            val start = length
-                            append(decryptedLabel)
-                            setSpan(ForegroundColorSpan(accent), start, start + decryptedLabel.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                // Build the optional '[Decrypted]' / skipped-count label prefix
+                val prefix = SpannableStringBuilder()
+                if (wasDecrypted) {
+                    val label = getString(R.string.msg_decrypted)
+                    val start = prefix.length
+                    prefix.append(label)
+                    prefix.setSpan(ForegroundColorSpan(accent), start, prefix.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+                if (xraySkipped > 0) {
+                    if (prefix.isNotEmpty()) prefix.append("\n")
+                    val label = resources.getQuantityString(R.plurals.msg_xray_skipped, xraySkipped, xraySkipped)
+                    val start = prefix.length
+                    prefix.append(label)
+                    prefix.setSpan(ForegroundColorSpan(accent), start, prefix.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+                if (prefix.isNotEmpty()) prefix.append("\n\n")
+
+                // Full result captured for the expand handler (shown via one setText on tap)
+                val expandPrefix: CharSequence = SpannableStringBuilder(prefix)
+                val expandBody: String = converted
+
+                // Initial text: truncated body with a clickable "show full", or the full text if short enough
+                val newText: CharSequence = if (isTruncated) {
+                    val showFullSpan = object : ClickableSpan() {
+                        override fun onClick(widget: View) {
+                            if (gen != fetchGeneration) return
+                            expandOutputToFull(expandPrefix, expandBody, gen)
                         }
-                        if (skipLabel != null) {
-                            if (length > 0) append("\n")
-                            val start = length
-                            append(skipLabel)
-                            setSpan(ForegroundColorSpan(accent), start, start + skipLabel.length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                        override fun updateDrawState(ds: TextPaint) {
+                            ds.color = accent
+                            ds.isUnderlineText = true
                         }
-                        append("\n\n")
-                        append(displayedBody)
                     }
+                    SpannableStringBuilder(prefix)
+                        .append(converted.take(MAX_DISPLAY_CHARS))
+                        .append(getString(R.string.msg_text_truncated))
+                        .apply {
+                            val start = length
+                            append(getString(R.string.msg_show_full))
+                            setSpan(showFullSpan, start, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
+                        }
                 } else {
-                    displayedBody
+                    SpannableStringBuilder(prefix).append(converted)
                 }
 
                 if (gen != fetchGeneration) return@launch
@@ -771,14 +862,7 @@ class MainActivity : AppCompatActivity() {
                 if (loadingPhaseRunning) {
                     pendingConfigText = newText
                 } else {
-                    output.crossfadeContent {
-                        output.visibility = View.VISIBLE
-                        btnExpandOutput.setImageResource(R.drawable.ic_expand_less)
-                        output.text = newText
-                        if (!output.isTextSelectable) {
-                            output.setTextIsSelectable(true)
-                        }
-                    }
+                    output.crossfadeContent { showOutputText(newText) }
                 }
             }
         }
@@ -827,7 +911,9 @@ class MainActivity : AppCompatActivity() {
         if (intent == null || intent.action != Intent.ACTION_VIEW) return
         val link = intent.dataString?.trim()
         intent.data = null
-        if (link.isNullOrEmpty() || !HappCrypto.isOpenableHappLink(link)) return
+        if (link.isNullOrEmpty() ||
+            !(HappCrypto.isOpenableHappLink(link) || V2RayTunCrypto.isCryptLink(link) ||
+              V2RayTunCrypto.isImportLink(link) || IncyLinks.isIncyLink(link))) return
         pendingImportLink = link
     }
 
@@ -1054,9 +1140,21 @@ class MainActivity : AppCompatActivity() {
                 btnPasteUrlManual.setImageResource(R.drawable.ic_key)
                 btnPasteUrlManual.setOnClickListener { handleDecryptUrl(text) }
             }
+            text.startsWith("v2raytun://crypt") -> {
+                btnPasteUrlManual.setImageResource(R.drawable.ic_key)
+                btnPasteUrlManual.setOnClickListener { handleDecryptV2RayTunUrl(text) }
+            }
             text.startsWith("happ://add/") -> {
                 btnPasteUrlManual.setImageResource(R.drawable.revert)
                 btnPasteUrlManual.setOnClickListener { handleParseAddUrl(text) }
+            }
+            V2RayTunCrypto.isImportLink(text) -> {
+                btnPasteUrlManual.setImageResource(R.drawable.revert)
+                btnPasteUrlManual.setOnClickListener { handleParseImportUrl(text) }
+            }
+            IncyLinks.isIncyLink(text) -> {
+                btnPasteUrlManual.setImageResource(R.drawable.revert)
+                btnPasteUrlManual.setOnClickListener { handleParseIncyUrl(text) }
             }
             text.startsWith("http://127.0.0.1:8166") -> {
                 btnPasteUrlManual.setImageResource(R.drawable.revert)
@@ -1065,6 +1163,14 @@ class MainActivity : AppCompatActivity() {
             HappCrypto.extractEmbeddedHappLink(text) != null -> {
                 btnPasteUrlManual.setImageResource(R.drawable.revert)
                 btnPasteUrlManual.setOnClickListener { handleUnwrapUrl(text) }
+            }
+            V2RayTunCrypto.extractEmbeddedV2RayLink(text) != null -> {
+                btnPasteUrlManual.setImageResource(R.drawable.revert)
+                btnPasteUrlManual.setOnClickListener { handleUnwrapV2RayUrl(text) }
+            }
+            IncyLinks.extractEmbeddedIncyLink(text) != null -> {
+                btnPasteUrlManual.setImageResource(R.drawable.revert)
+                btnPasteUrlManual.setOnClickListener { handleUnwrapIncyUrl(text) }
             }
             else -> {
                 btnPasteUrlManual.setImageResource(R.drawable.ic_paste)
@@ -1076,9 +1182,9 @@ class MainActivity : AppCompatActivity() {
     private fun handlePasteUrl() {
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         val clip = clipboard.primaryClip
-        if (clip != null && clip.itemCount > 0) {
-            val pasteText = clip.getItemAt(0).text.toString().trim()
-            inputUrl.setText(pasteText.replace("\n", "").replace("\r", ""))
+        val pasteText = if (clip != null && clip.itemCount > 0) clip.getItemAt(0).text?.toString() else null
+        if (pasteText != null) {
+            inputUrl.setText(pasteText.trim().replace("\n", "").replace("\r", ""))
         } else {
             Toast.makeText(this, getString(R.string.msg_clipboard_empty), Toast.LENGTH_SHORT).show()
         }
@@ -1095,6 +1201,36 @@ class MainActivity : AppCompatActivity() {
     // Strip happ://add/ down to the inner link
     private fun handleParseAddUrl(addUrl: String) {
         val bare = HappCrypto.stripAddPrefix(addUrl) ?: return
+        mainContainer.beginDelayedTransitionIfEnabled(fastTransition)
+        inputUrl.setText(bare.replace("\n", "").replace("\r", ""))
+    }
+
+    // Pull the bare v2raytun:// link out of an http carrier
+    private fun handleUnwrapV2RayUrl(carrierUrl: String) {
+        val bare = V2RayTunCrypto.extractEmbeddedV2RayLink(carrierUrl)
+        if (bare != null) {
+            inputUrl.setText(bare)
+        }
+    }
+
+    // Pull the bare incy:// link out of an http carrier
+    private fun handleUnwrapIncyUrl(carrierUrl: String) {
+        val bare = IncyLinks.extractEmbeddedIncyLink(carrierUrl)
+        if (bare != null) {
+            inputUrl.setText(bare)
+        }
+    }
+
+    // Strip v2raytun://import* down to the inner link
+    private fun handleParseImportUrl(importUrl: String) {
+        val bare = V2RayTunCrypto.stripImportPrefix(importUrl) ?: return
+        mainContainer.beginDelayedTransitionIfEnabled(fastTransition)
+        inputUrl.setText(bare.replace("\n", "").replace("\r", ""))
+    }
+
+    // Strip incy://add/ or incy://import/ down to the inner link
+    private fun handleParseIncyUrl(incyUrl: String) {
+        val bare = IncyLinks.stripIncyPrefix(incyUrl) ?: return
         mainContainer.beginDelayedTransitionIfEnabled(fastTransition)
         inputUrl.setText(bare.replace("\n", "").replace("\r", ""))
     }
@@ -1118,6 +1254,178 @@ class MainActivity : AppCompatActivity() {
                     )
                 }
                 HappCrypto.HappLinkResult.NotHappLink -> {
+                    showInfoDialog(
+                        getString(R.string.title_decryption_error),
+                        getString(R.string.error_url_not_found)
+                    )
+                }
+            }
+        }
+    }
+
+    // Hide the centered wait label and stop any of its animations
+    private fun hideWaitLabel() {
+        blockOutputTouch = false
+        outputWaitLabel.animate().cancel()
+        outputWaitLabel.alpha = 0f
+        outputWaitLabel.visibility = View.GONE
+    }
+
+    // Expand to full text: fade the result out, swap text (keeping scroll, no jump), fade back in
+    private fun expandOutputToFull(prefix: CharSequence, body: String, gen: Int) {
+        if (outputExpanding) return
+        outputExpanding = true
+        outputExpandAborted = false
+
+        // Label prefix (if any) + full body
+        val fullText: CharSequence = if (prefix.isEmpty()) body else SpannableStringBuilder(prefix).append(body)
+        val duration = resources.getInteger(R.integer.duration_standard_transition).toLong()
+        val animate = !skipProgrammaticAnimations()
+
+        // Swap text + restore scroll, then fade the full text in
+        val swapAndReveal = {
+            if (!outputExpandAborted && gen == fetchGeneration && output.visibility == View.VISIBLE) {
+                val scrollView = findViewById<ScrollView>(R.id.mainScrollView)
+                val keepY = scrollView?.scrollY ?: 0
+
+                val hadFocusable = output.isFocusableInTouchMode
+                output.isFocusableInTouchMode = false
+                output.animate().cancel()
+                try {
+                    output.text = fullText
+                } catch (_: Throwable) {
+                }
+                if (!output.isTextSelectable) {
+                    output.setTextIsSelectable(true)
+                }
+                output.movementMethod = OutputLinkMovementMethod.getInstance()
+                (output.text as? Spannable)?.let { android.text.Selection.removeSelection(it) }
+                output.isFocusableInTouchMode = hadFocusable
+                applyOutputScrollbar()
+
+                if (scrollView != null) {
+                    scrollView.viewTreeObserver.addOnPreDrawListener(object : ViewTreeObserver.OnPreDrawListener {
+                        override fun onPreDraw(): Boolean {
+                            scrollView.viewTreeObserver.removeOnPreDrawListener(this)
+                            scrollView.scrollY = keepY
+                            return true
+                        }
+                    })
+                }
+
+                if (animate) {
+                    output.alpha = 0f
+                    // The wait label fades out as the full text fades in; the full text is now interactive
+                    blockOutputTouch = false
+                    outputWaitLabel.animate().cancel()
+                    outputWaitLabel.animate().alpha(0f).setDuration(duration).withLayer().withEndAction {
+                        outputWaitLabel.visibility = View.GONE
+                    }.start()
+                    output.animate().alpha(1f).setDuration(duration).withLayer().withEndAction {
+                        outputExpanding = false
+                    }.start()
+                } else {
+                    output.alpha = 1f
+                    hideWaitLabel()
+                    outputExpanding = false
+                }
+            } else {
+                output.alpha = 1f
+                hideWaitLabel()
+                outputExpanding = false
+            }
+        }
+
+        // Start the fade-out immediately on tap; the heavy work runs under it
+        var fadeDone = !animate
+        var warmDone = false
+        val proceed = { if (fadeDone && warmDone) swapAndReveal() }
+
+        if (animate) {
+            output.animate().cancel()
+            outputWaitLabel.animate().cancel()
+            // The wait label fades in over the visible result area as the truncated text fades out
+            blockOutputTouch = true
+            outputWaitLabel.alpha = 0f
+            outputWaitLabel.visibility = View.VISIBLE
+            outputWaitLabel.animate().alpha(1f).setDuration(duration).withLayer().start()
+            output.animate().alpha(0f).setDuration(duration).withLayer().withEndAction {
+                fadeDone = true
+                proceed()
+            }.start()
+        } else {
+            // No animations: show the wait label instantly while the heavy work runs
+            output.animate().cancel()
+            blockOutputTouch = true
+            output.alpha = 0f
+            outputWaitLabel.animate().cancel()
+            outputWaitLabel.alpha = 1f
+            outputWaitLabel.visibility = View.VISIBLE
+        }
+
+        expandJob?.cancel()
+        expandJob = lifecycleScope.launch {
+            // Warm the text-layout cache off the UI thread (helps setText where supported)
+            withContext(Dispatchers.Default) {
+                try {
+                    val params = TextViewCompat.getTextMetricsParams(output)
+                    PrecomputedTextCompat.create(fullText, params)
+                } catch (_: Throwable) {
+                }
+            }
+            if (gen != fetchGeneration) {
+                outputExpanding = false
+                return@launch
+            }
+            warmDone = true
+            proceed()
+        }
+        // If the job is cancelled mid-warm (collapse/new fetch), never leave the flag stuck or label shown
+        expandJob?.invokeOnCompletion { cause ->
+            if (cause != null) output.post {
+                outputExpanding = false
+                hideWaitLabel()
+            }
+        }
+    }
+
+    // Show result text in the output view: visible, selectable, with link taps enabled
+    private fun showOutputText(text: CharSequence) {
+        output.visibility = View.VISIBLE
+        btnExpandOutput.setImageResource(R.drawable.ic_expand_less)
+        output.text = text
+        if (!output.isTextSelectable) {
+            output.setTextIsSelectable(true)
+        }
+        output.movementMethod = OutputLinkMovementMethod.getInstance()
+        applyOutputScrollbar()
+    }
+
+    // Pick the scrollbar mode: custom thumb only for a large result that's expanded on screen, otherwise stock
+    private fun applyOutputScrollbar() {
+        val large = fullResponseText.length > MAX_DISPLAY_CHARS && output.visibility == View.VISIBLE
+        (findViewById<View>(R.id.mainScrollView) as? NoAutoScrollView)?.setFastScrollActive(large)
+    }
+
+    // Decrypt a v2raytun://crypt link off-thread, then show it (or the error)
+    private fun handleDecryptV2RayTunUrl(cryptUrl: String) {
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                V2RayTunCrypto.decryptCryptLink(cryptUrl)
+            }
+            when (result) {
+                is V2RayTunCrypto.Result.Decrypted -> {
+                    mainContainer.beginDelayedTransitionIfEnabled(fastTransition)
+                    inputUrl.setText(result.plaintext)
+                }
+                is V2RayTunCrypto.Result.Error -> {
+                    val safeDetail = TextUtils.htmlEncode("v2raytun: ${result.reason}")
+                    showInfoDialog(
+                        getString(R.string.title_decryption_error),
+                        safeDetail
+                    )
+                }
+                V2RayTunCrypto.Result.NotCryptLink -> {
                     showInfoDialog(
                         getString(R.string.title_decryption_error),
                         getString(R.string.error_url_not_found)
@@ -1157,19 +1465,16 @@ class MainActivity : AppCompatActivity() {
                 if (!inputHwid.isEnabled) handleToggleHwidEdit(true)
                 inputHwid.setText(it)
             }
-            ua?.let {
-                if (!inputUserAgent.isEnabled) handleToggleUaEdit(true)
-                inputUserAgent.setText(it)
-            }
+            ua?.let { inputUserAgent.setText(it) }
         } catch (e: Exception) {}
     }
 
     private fun handlePasteHwid() {
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         val clip = clipboard.primaryClip
-        if (clip != null && clip.itemCount > 0) {
-            val pasteText = clip.getItemAt(0).text.toString().replace("\n", "").replace("\r", "")
-            inputHwid.setText(pasteText)
+        val pasteText = if (clip != null && clip.itemCount > 0) clip.getItemAt(0).text?.toString() else null
+        if (pasteText != null) {
+            inputHwid.setText(pasteText.replace("\n", "").replace("\r", ""))
         } else {
             Toast.makeText(this, getString(R.string.msg_clipboard_empty), Toast.LENGTH_SHORT).show()
         }
@@ -1241,44 +1546,12 @@ class MainActivity : AppCompatActivity() {
         PrefsManager.broadcastSettings(this)
     }
 
-    // Toggle manual UA entry; restore the default UA when turning it off
-    private fun handleToggleUaEdit(enabled: Boolean) {
-        val prefs = getSafePrefs(this)
-        inputUserAgent.isEnabled = enabled
-        prefs.edit().putBoolean("use_custom_ua_input", enabled).apply()
-
-        if (!enabled) {
-            inputUserAgent.setText(getHappDefaultUa())
-        } else {
-            val custom = prefs.getString("custom_user_agent", "")
-            if (!custom.isNullOrEmpty()) {
-                inputUserAgent.setText(custom)
-            }
-            inputUserAgent.clearFocus()
-        }
-        refreshFieldStyle(layoutUserAgent, inputUserAgent)
-    }
-
     // On start: reconcile LSPatch, reload history, refresh the UI
     override fun onStart() {
         super.onStart()
         checkLSPatchStatus()
         loadUrlHistory()
         updateUiState()
-    }
-
-    // Drop manual UA editing if it's just the default
-    override fun onStop() {
-        super.onStop()
-        val prefs = getSafePrefs(this)
-
-        if (inputUserAgent.isEnabled) {
-            val currentUa = inputUserAgent.text.toString()
-            val defaultUa = getHappDefaultUa()
-            if (currentUa == defaultUa || currentUa.isEmpty()) {
-                handleToggleUaEdit(false)
-            }
-        }
     }
 
     // Reconcile LSPatch apps (signatures / installed state) and toggle lspatch_mode
@@ -1295,7 +1568,7 @@ class MainActivity : AppCompatActivity() {
 
         val lspatchApps = prefs.getStringSet("lspatch_apps", mutableSetOf())?.toMutableSet() ?: mutableSetOf()
         val sigMapJson = prefs.getString("lspatch_signatures", "{}") ?: "{}"
-        val sigMap = org.json.JSONObject(sigMapJson)
+        val sigMap = try { org.json.JSONObject(sigMapJson) } catch (_: Throwable) { org.json.JSONObject() }
 
         Log.d("Happwner:LSP", "Checking status. Apps in list: ${lspatchApps.size}")
 
@@ -1384,13 +1657,9 @@ class MainActivity : AppCompatActivity() {
         }
         updateHwidHintVisibility(inputHwid.text?.toString())
 
-        val isUaInputEnabled = prefs.getBoolean("use_custom_ua_input", false)
-        inputUserAgent.isEnabled = isUaInputEnabled
-
-        if (isUaInputEnabled) {
-            inputUserAgent.setText(prefs.getString("custom_user_agent", getHappDefaultUa()))
-        } else {
-            inputUserAgent.setText(getHappDefaultUa())
+        val targetUa = getCurrentUa()
+        if (inputUserAgent.text.toString() != targetUa) {
+            inputUserAgent.setText(targetUa)
         }
 
         refreshAllFieldsStyle(false)
@@ -1584,17 +1853,80 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Default UA from the installed Happ version, else a fallback
-    private fun getHappDefaultUa(): String {
-        for (pkg in arrayOf(PrefsManager.HAPP_PKG_PRIMARY, PrefsManager.HAPP_PKG_SECONDARY)) {
+    // Compare version names numerically so 3.22.1 > 3.9.0; pulls digit groups, ignores the rest
+    private fun compareVersionNames(a: String, b: String): Int {
+        val rx = Regex("\\d+")
+        val pa = rx.findAll(a).map { it.value.toLongOrNull() ?: 0L }.toList()
+        val pb = rx.findAll(b).map { it.value.toLongOrNull() ?: 0L }.toList()
+        for (i in 0 until maxOf(pa.size, pb.size)) {
+            val x = pa.getOrElse(i) { 0L }
+            val y = pb.getOrElse(i) { 0L }
+            if (x != y) return x.compareTo(y)
+        }
+        return 0
+    }
+
+    // Build a preset UA "<brand>/<version>" from the newest installed package; else strings.xml default
+    private fun buildPresetUa(defaultRes: Int, pkgs: Array<String>?): String {
+        val default = getString(defaultRes)
+        if (pkgs == null) return default
+        var best: String? = null
+        for (pkg in pkgs) {
             try {
-                val packageInfo = packageManager.getPackageInfo(pkg, 0)
-                val v = packageInfo.versionName
-                if (!v.isNullOrEmpty()) return "Happ/$v"
+                val v = packageManager.getPackageInfo(pkg, 0).versionName
+                if (!v.isNullOrEmpty() && (best == null || compareVersionNames(v, best) > 0)) {
+                    best = v
+                }
             } catch (_: PackageManager.NameNotFoundException) {
             } catch (_: Throwable) {}
         }
-        return "Happ/1.0.0"
+        return if (best != null) default.substringBefore("/") + "/" + best else default
+    }
+
+    // The UA string for a given preset (version filled from the installed app when present)
+    private fun uaForMode(mode: String): String = when (mode) {
+        "v2raytun" -> getString(R.string.ua_default_v2raytun)
+        "incy" -> buildPresetUa(R.string.ua_default_incy, arrayOf(PrefsManager.INCY_PKG))
+        else -> buildPresetUa(R.string.ua_default_happ, arrayOf(PrefsManager.HAPP_PKG_PRIMARY, PrefsManager.HAPP_PKG_SECONDARY))
+    }
+
+    // UA to show on startup: whatever the user last had; empty by default (then UA is omitted)
+    private fun getCurrentUa(): String {
+        return getSafePrefs(this).getString("custom_user_agent", "") ?: ""
+    }
+
+    // Dialog to pick one of 3 preset User-Agents; the field stays editable for manual tweaks
+    private fun showUaSelectDialog() {
+        val current = inputUserAgent.text.toString().trim()
+        val dialogView = layoutInflater.inflate(R.layout.dialog_select_option, null)
+        val rg = dialogView.findViewById<android.widget.RadioGroup>(R.id.dialogRadioGroup)
+        val r1 = dialogView.findViewById<com.google.android.material.radiobutton.MaterialRadioButton>(R.id.radioOption1)
+        val r2 = dialogView.findViewById<com.google.android.material.radiobutton.MaterialRadioButton>(R.id.radioOption2)
+        val r3 = dialogView.findViewById<com.google.android.material.radiobutton.MaterialRadioButton>(R.id.radioOption3)
+        val happUa = uaForMode("happ")
+        val v2rayUa = uaForMode("v2raytun")
+        val incyUa = uaForMode("incy")
+        r1.text = happUa
+        r2.text = v2rayUa
+        r3.text = incyUa
+        when (current) {
+            v2rayUa -> r2.isChecked = true
+            incyUa -> r3.isChecked = true
+            happUa -> r1.isChecked = true
+        }
+        val dialog = AnimatedDialogBuilder(this)
+            .setTitle(getString(R.string.ua_select_title))
+            .setView(dialogView)
+            .showAnimated()
+        rg.setOnCheckedChangeListener { _, checkedId ->
+            val picked = when (checkedId) {
+                R.id.radioOption2 -> v2rayUa
+                R.id.radioOption3 -> incyUa
+                else -> happUa
+            }
+            inputUserAgent.crossfadeText(picked) { refreshFieldStyle(layoutUserAgent, inputUserAgent) }
+            try { dialog.dismiss() } catch (_: Throwable) {}
+        }
     }
 
     private fun fromHtml(text: String): CharSequence {
@@ -1833,7 +2165,7 @@ class MainActivity : AppCompatActivity() {
             conn.apply {
                 requestMethod = "GET"
                 setRequestProperty("x-hwid", hwid)
-                setRequestProperty("User-Agent", ua)
+                if (ua.isNotBlank()) setRequestProperty("User-Agent", ua)
                 connectTimeout = timeout
                 readTimeout = timeout
             }
@@ -1849,8 +2181,8 @@ class MainActivity : AppCompatActivity() {
     // Pick the URL field color by state (error / encrypted / normal)
     private fun getUrlCurrentColor(): Int {
         val text = inputUrl.text.toString().trim()
-        val isEncrypted = text.startsWith("happ://crypt")
-        val isAddLink = text.startsWith("happ://add/")
+        val isEncrypted = text.startsWith("happ://crypt") || text.startsWith("v2raytun://crypt")
+        val isAddLink = text.startsWith("happ://add/") || V2RayTunCrypto.isImportLink(text) || IncyLinks.isIncyLink(text)
         val hasError = !text.isEmpty() && !isEncrypted && !isAddLink && !text.startsWith("http://") && !text.startsWith("https://")
 
         return when {

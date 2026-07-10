@@ -104,7 +104,7 @@ class SettingsFragment : Fragment() {
         bindBatteryOptItem(view)
         bindWatchdogItem(view)
         bindHwidSpoofItem(view)
-        bindHappUnlockItem(view)
+        bindUnlockItem(view)
         bindInterceptLinksItem(view)
         bindShowDuplicatesItem(view)
 
@@ -265,28 +265,28 @@ class SettingsFragment : Fragment() {
             prefs.getBoolean("bridge_watchdog", false)
         v.findViewById<SwitchMaterial>(R.id.switchHwidSpoof)?.isChecked =
             PrefsManager.isHwidSpoofEnabled(ctx)
-        v.findViewById<SwitchMaterial>(R.id.switchHappUnlock)?.isChecked =
-            PrefsManager.isHappUnlockHookEnabled(ctx)
+        v.findViewById<SwitchMaterial>(R.id.switchUnlock)?.isChecked =
+            PrefsManager.isUnlockHookEnabled(ctx)
 
         updateHwidSpoofStatus(v)
 
         val animationOptions = resources.getStringArray(R.array.animation_options)
         v.findViewById<TextView>(R.id.textAnimationsStatus)?.text =
-            fromHtml(animationOptions[ctx.animMode()])
+            fromHtml(animationOptions.getOrElse(ctx.animMode()) { animationOptions[0] })
 
         updateBatteryStatus()
         updateXposedSectionVisibility(v)
     }
 
-    // The Xposed / "unlock Happ" section is shown only while the module is active
+    // The Xposed / unlock section is shown only while the module is active
     private fun updateXposedSectionVisibility(view: View) {
         val ctx = context ?: return
         val xposedActive = PrefsManager.isXposedActive(ctx)
-        val happActiveForModule = PrefsManager.isHappActiveForModule(ctx)
+        val unlockTargetActive = PrefsManager.isUnlockTargetActiveForModule(ctx)
         view.findViewById<View>(R.id.xposedSection)?.visibility =
             if (xposedActive) View.VISIBLE else View.GONE
-        view.findViewById<View>(R.id.itemHappUnlock)?.visibility =
-            if (xposedActive && happActiveForModule) View.VISIBLE else View.GONE
+        view.findViewById<View>(R.id.itemUnlock)?.visibility =
+            if (xposedActive && unlockTargetActive) View.VISIBLE else View.GONE
     }
 
     // Insets for the system bars, plus auto-scroll to the field when the keyboard appears
@@ -434,7 +434,7 @@ class SettingsFragment : Fragment() {
 
     // Theme label, with a Monet-accent suffix when enabled
     private fun themeStatusText(ctx: Context, themeIdx: Int, themeOptionsRaw: Array<String>): String {
-        val base = themeOptionsRaw[themeIdx]
+        val base = themeOptionsRaw.getOrElse(themeIdx) { themeOptionsRaw[0] }
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
             getSafePrefs(ctx).getBoolean("monet_accent", false)
         ) {
@@ -534,7 +534,7 @@ class SettingsFragment : Fragment() {
         val textAnimationsStatus = view.findViewById<TextView>(R.id.textAnimationsStatus)
         val ctx = requireContext()
         val animationOptionsRaw = resources.getStringArray(R.array.animation_options)
-        textAnimationsStatus.text = fromHtml(animationOptionsRaw[ctx.animMode()])
+        textAnimationsStatus.text = fromHtml(animationOptionsRaw.getOrElse(ctx.animMode()) { animationOptionsRaw[0] })
 
         view.findViewById<MaterialCardView>(R.id.itemAnimations).setOnClickListener {
             showAnimationsDialog()
@@ -620,12 +620,12 @@ class SettingsFragment : Fragment() {
         }
     }
 
-    // Setting: Unlock Happ settings
-    private fun bindHappUnlockItem(view: View) {
-        val item = view.findViewById<MaterialCardView>(R.id.itemHappUnlock)
-        val switch = view.findViewById<SwitchMaterial>(R.id.switchHappUnlock)
+    // Setting: Unlock profiles in encrypted subscriptions
+    private fun bindUnlockItem(view: View) {
+        val item = view.findViewById<MaterialCardView>(R.id.itemUnlock)
+        val switch = view.findViewById<SwitchMaterial>(R.id.switchUnlock)
         val ctx = requireContext()
-        switch.isChecked = PrefsManager.isHappUnlockHookEnabled(ctx)
+        switch.isChecked = PrefsManager.isUnlockHookEnabled(ctx)
         val update: (Boolean) -> Unit = { checked ->
             getSafePrefs(ctx).edit().putBoolean("hook_happ_unlock_settings", checked).apply()
             switch.isChecked = checked

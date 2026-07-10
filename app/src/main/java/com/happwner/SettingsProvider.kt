@@ -40,7 +40,7 @@ class SettingsProvider : ContentProvider() {
                 putString(KEY_HWID, hwidToSend)
                 putBoolean(KEY_ENABLED, isActive)
                 putBoolean("intercept_enabled", prefs.getBoolean("intercept_enabled", false))
-                putBoolean("hook_happ_unlock_settings", PrefsManager.isHappUnlockHookEnabled(context))
+                putBoolean("hook_happ_unlock_settings", PrefsManager.isUnlockHookEnabled(context))
             }
             // Persist a captured subscription URL into history and notify the UI
             METHOD_SAVE_URL -> {
@@ -51,6 +51,7 @@ class SettingsProvider : ContentProvider() {
                     prefs.edit().putString("url_history_list", list.joinToString("|||")).apply()
 
                     context.sendBroadcast(android.content.Intent("${context.packageName}.URL_CAPTURED").apply {
+                        setPackage(context.packageName)
                         putExtra("url", arg)
                     })
                 }
@@ -87,7 +88,7 @@ class SettingsProvider : ContentProvider() {
         synchronized(recordLock) {
             val locked = prefs.getStringSet("lspatch_apps", mutableSetOf())?.toMutableSet() ?: mutableSetOf()
             val sigMapJson = prefs.getString("lspatch_signatures", "{}") ?: "{}"
-            val sigMap = org.json.JSONObject(sigMapJson)
+            val sigMap = try { org.json.JSONObject(sigMapJson) } catch (_: Throwable) { org.json.JSONObject() }
 
             for (pkg in callingPkgs) {
                 if (pkg == null || pkg == ownPkg) continue
@@ -114,7 +115,7 @@ class SettingsProvider : ContentProvider() {
 
         if (anyAdded) {
             // Signal the UI to refresh (if it is alive)
-            context.sendBroadcast(android.content.Intent("$ownPkg.REFRESH_UI"))
+            context.sendBroadcast(android.content.Intent("$ownPkg.REFRESH_UI").setPackage(ownPkg))
         }
     }
 
@@ -128,7 +129,7 @@ class SettingsProvider : ContentProvider() {
         val hwidToSend = if (isActive) custom else ""
         cursor.addRow(arrayOf(KEY_HWID, hwidToSend))
         cursor.addRow(arrayOf(KEY_ENABLED, if (isActive) 1 else 0))
-        cursor.addRow(arrayOf("hook_happ_unlock_settings", if (PrefsManager.isHappUnlockHookEnabled(context)) 1 else 0))
+        cursor.addRow(arrayOf("hook_happ_unlock_settings", if (PrefsManager.isUnlockHookEnabled(context)) 1 else 0))
         return cursor
     }
 

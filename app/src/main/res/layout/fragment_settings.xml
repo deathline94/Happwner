@@ -74,7 +74,7 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:overScrollMode="never"
-        android:scrollbars="none"
+        android:scrollbars="vertical"
         android:clipToPadding="false">
 
         <LinearLayout
@@ -782,7 +782,7 @@
                 </com.google.android.material.card.MaterialCardView>
 
                 <com.google.android.material.card.MaterialCardView
-                    android:id="@+id/itemHappUnlock"
+                    android:id="@+id/itemUnlock"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginBottom="@dimen/island_margin_bottom"
@@ -822,7 +822,7 @@
                                 android:textSize="@dimen/text_size_label" />
 
                             <TextView
-                                android:id="@+id/textHappUnlockDesc"
+                                android:id="@+id/textUnlockDesc"
                                 android:layout_width="match_parent"
                                 android:layout_height="wrap_content"
                                 android:text="@string/setting_hook_unlock_desc"
@@ -832,7 +832,7 @@
                         </LinearLayout>
 
                         <com.google.android.material.switchmaterial.SwitchMaterial
-                            android:id="@+id/switchHappUnlock"
+                            android:id="@+id/switchUnlock"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:clickable="false"
