@@ -48,6 +48,7 @@ When importing a decrypted subscription into v2rayN / v2rayNG / NekoBox:
 * Some providers also check `x-hwid`; v2rayN's *HTTP headers (JSON)* field accepts `{"x-hwid": "your-hwid"}`.
 * If the subscription body is Happ-encrypted (`key=` in URL + `Encrypt-Tag` header), plain clients **cannot** decrypt it — use this tool's decrypted/converted output instead. If it's plain (like most), clients update it natively.
 * Don't leave the auto-update interval at `0` — that disables auto-updates entirely.
+* **Windows 10 + TLS 1.3**: some providers' front-ends (e.g. Cloudflare) *require* TLS 1.3, and Windows 10's system TLS (used by v2rayN's updater) has no TLS 1.3 — the update then fails with `net_http_ssl_connection_failed` / `tls alert ProtocolVersion`. Fix: connect to any node first and run **Update subscriptions with proxy** (the xray core brings its own TLS stack), or enable *update via proxy* in the settings.
 
 ---
 
