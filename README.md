@@ -1,125 +1,76 @@
 <p align="center">
   <b>English</b> |
-  <a href="README_RU.md">Русский</a>
+  <a href="README_UPSTREAM.md">Android app / upstream docs</a>
 </p>
 
-# Happwner
+# Happwner Web
 
-<div align="center">
-<img width="100" height="100" alt="Happwner icon" src="https://github.com/user-attachments/assets/93bc69a7-82b3-44b3-a577-52d6b56edc51" />
+<p align="center">
+  <img width="100" height="100" alt="Happwner icon" src="https://github.com/user-attachments/assets/93bc69a7-82b3-44b3-a577-52d6b56edc51" />
 
-An Android app and Xposed module for exporting subscriptions from the proxy utility [Happ](https://play.google.com/store/apps/details?id=com.happproxy) into any VPN apps (NekoBox, v2rayNG, Hiddify, and similar clients).
+  <b>🔓 Live app: <a href="https://deathline94.github.io/Happwner-Web/">https://deathline94.github.io/Happwner-Web/</a></b>
+</p>
 
-**Android 5.0+** is supported.
+A **fully client-side web port** of [Happwner](https://github.com/Omegaplexx/Happwner) — decrypt `happ://crypt…crypt5` links and Happ-encrypted subscription profiles right in the browser, and export them into any VPN client (v2rayN, v2rayNG, NekoBox, Hiddify, sing-box, …).
 
-**🌐 Web version included** — this repository ships a fully client-side web port of the crypto & conversion engine in [`docs/`](docs/), **live on GitHub Pages: <https://deathline94.github.io/Happwner-Web/>** (no backend, no build step):
+**Nothing is uploaded anywhere.** Decryption runs entirely in your browser: links, keys and configs never leave your machine. No backend, no build step, no dependencies — a static site you can host anywhere.
 
-* `happ://crypt` … `crypt5` link decryption (RSA PKCS#1 + ChaCha20-Poly1305, legacy & salted layouts)
-* Encrypted subscription bodies (AES-128-GCM, `key01`–`key10` + `Encrypt-Tag`)
-* `happ://add/`, `v2raytun://crypt|import`, `incy://` handling incl. http(s)-wrapped links
-* Base64 ↔ links, JSON outbounds → proxy links, Xray → sing-box conversion & merging
-* HWID generator for `x-hwid`, batch mode, server overview cards
-
-Open `docs/index.html` via any static server (or the Pages URL). Tests: `node tests/crypto-test.mjs && node tests/converter-test.mjs`.
-</div>
-
-## Screenshots
-
-<div>
-<img src="https://github.com/user-attachments/assets/11e8ce9d-02d6-4c9f-943d-d94277290ab8" width="30%" />
-<img src="https://github.com/user-attachments/assets/b91e0269-4175-4111-b439-9972d13a0529" width="30%" />
-<img src="https://github.com/user-attachments/assets/8c71d7e2-112b-445f-b1e5-53c30eaa7a74" width="30%" />
-<img src="https://github.com/user-attachments/assets/f339409c-5505-49a3-9a2c-b7aa8a2837fe" width="30%" />
-<img src="https://github.com/user-attachments/assets/c37acc91-86d3-401b-abd4-eba543a424a3" width="30%" />
-<img src="https://github.com/user-attachments/assets/4d943fcf-a480-4396-9eb6-81b1235ae779" width="30%" />
-<img src="https://github.com/user-attachments/assets/3293a5a3-aa3e-4d57-a719-ce6cdb1ce4f8" width="30%" />
-</div>
+---
 
 ## Features
 
-**Happwner** extracts clean VPN configurations and transfers them into any application. You do <u>not</u> need to install Happ to use all of its subscriptions.
+### 🔓 Decrypt tab
+* **Link decryption** — `happ://crypt`, `crypt2`, `crypt3`, `crypt4`, `crypt5` (RSA + ChaCha20-Poly1305, legacy & salted layouts). No Happ, no Xposed, no internet connection required.
+* **v2rayTun & INCY links** — `v2raytun://crypt/` (RSA-4096), `v2raytun://import/`, `incy://add|import`.
+* **Wrapped links** — extracts `happ://`/`v2raytun://`/`incy://` links hidden inside http(s) URLs (incl. double URL-encoding).
+* **Batch mode** — one link per line.
+* **Base64 blobs** — subscription-style base64 payloads decode inline.
+* **Server cards** — every decrypted output is parsed into cards showing protocol, security (TLS/Reality), transport, host and port.
 
-Features:
+### 📡 Subscription tab
+* Fetch a subscription URL and **auto-decrypt Happ-encrypted bodies** (AES-128-GCM with the ten keys built into Happ, `key01`–`key10` + `Encrypt-Tag`).
+* **HWID field** — generate a random hardware ID to send as `x-hwid` (device-limit workarounds), optionally a new one per request.
+* **User-Agent** — client presets (Happ Android/iOS, v2rayNG, NekoBox, curl) plus **Extract UA**: copies your browser's real User-Agent.
+* **Transports** — direct request or public CORS-proxy fallbacks; manual paste mode when a provider needs exact headers.
+* **Wrap → `happ://add/`** — turns any subscription URL into a Happ-importable deep link.
 
-* **Link decryption**. Supported formats: `happ://crypt`, `crypt2`, `crypt3`, `crypt4`, `crypt5`. Decryption does <u>not require</u> Happ, Xposed, LSPatch/NPatch, or an internet connection.
-* **Subscription profile decryption**. If a provider encrypted their servers using one of the ten keys built into Happ, the app will automatically decrypt them and display the corresponding message.
-* **HWID spoofing** when requesting subscriptions <u>through the Happwner interface</u>. Allows bypassing device limits and restoring access to subscriptions after changing devices;
-* **"Bridge"** — a built-in service for updating Happ subscriptions inside any apps (NekoBox, Hiddify, v2rayNG, husi, Exclave, Karing, and others);
-* **Intent link handling** for `happ://add` and `happ://crypt`, instead of Happ itself.
+### 🔁 Converter tab
+* Base64 ↔ links, JSON outbounds → proxy links (vless / vmess / ss / trojan / hysteria2 / tuic).
+* **Full Xray → sing-box conversion** (TLS/Reality, ws/grpc/http/httpupgrade transports, routing rules, DNS, rule-sets) with config merging.
 
-### Xposed Features
+---
 
-* **Link interception**. An alternative method for decrypting `crypt` links. Works in all applications and may be useful if decryption keys are unavailable (for example, when `crypt6` appears);
-* **HWID spoofing <u>inside Happ</u>** and other apps marked as targets in the Xposed/LSPosed manager;
-* **Unlocking encrypted subscription profiles inside Happ**. Forces profile arrows to appear and allows exporting configurations even when the subscription is encrypted;
-* **Quick access to the Happwner interface** via a three-finger tap gesture while Happ or another target app is open.
+## Notes for VPN clients
 
-**Xposed functionality requires Xposed / EdXposed / LSPosed / Vector, OR a patched version of Happ created using Xpatch / LSPatch / NPatch / FPA.**
+When importing a decrypted subscription into v2rayN / v2rayNG / NekoBox:
 
-## Installation
+* **Many Happ providers reject requests without the Happ User-Agent** (they answer `502`) — keep the `Happ/…` UA string in the client's *User-Agent* field.
+* Some providers also check `x-hwid`; v2rayN's *HTTP headers (JSON)* field accepts `{"x-hwid": "your-hwid"}`.
+* If the subscription body is Happ-encrypted (`key=` in URL + `Encrypt-Tag` header), plain clients **cannot** decrypt it — use this tool's decrypted/converted output instead. If it's plain (like most), clients update it natively.
+* Don't leave the auto-update interval at `0` — that disables auto-updates entirely.
 
-1. Install the Happwner APK from the [Releases](https://github.com/Omegaplexx/Happwner/releases) page.
+---
 
-The app supports **Android 5.0 (Lollipop)** and above.
+## Run it yourself
 
-### Xposed (Optional)
+* Live: **https://deathline94.github.io/Happwner-Web/**
+* Or serve the `docs/` folder with any static server, e.g. `python -m http.server 8080 --directory docs` — then open `http://localhost:8080`.
+* Or host it anywhere static (GitHub Pages, Netlify, …) — it's just files.
 
-#### Root
+## Development
 
-1. Install **Happwner** and **Happ**;
-2. Enable **Happwner** in your **Xposed** manager and select the recommended apps;
-3. Restart **Happ**.
+```
+docs/                    the web app (index.html + css/ + js/)
+tests/                   node test suites (crypto + converters)
+tools/extract_keys.mjs   regenerates docs/js/keys.js from the Kotlin sources
+```
 
-#### Without Root
+* Plain ES5+-style JavaScript, no framework, no bundler.
+* The RSA / ChaCha20-Poly1305 / AES-GCM implementations are ports of the Kotlin originals; the key material is extracted automatically from `HappCrypto.kt` / `V2RayTunCrypto.kt` so nothing is transcribed by hand.
+* Run the tests: `node tests/crypto-test.mjs && node tests/converter-test.mjs` (60 checks, verify against Node's native crypto).
 
-1. Install **Happwner**, **Happ**, and [NPatch](https://github.com/7723mod/NPatch/releases/tag/v1.0.2) (version **1.0.2** is recommended);
-2. In **NPatch**: *Manage tab* → *"+" button* → *Select an installed app* → ***Happ*** → *Integrated mode* → *Embed Modules* → ***Happwner*** → *Start Patch*.
+## Credits & license
 
-**NPatch does not notify the user when the patched app has been installed successfully. Tap "Install", wait a few seconds, then check whether Happ appears in your application list.**
+Based on **[Happwner](https://github.com/Omegaplexx/Happwner)** by [Omegaplex](https://github.com/Omegaplexx) and [slavrom21](https://github.com/21slavrom) — this repository is a fork of it; the original Android/Xposed app and its full documentation live in [`README_UPSTREAM.md`](README_UPSTREAM.md).
 
-## Why Happwner?
-
-To give users control over their subscriptions again, improve service transparency, and protect themselves from dishonest providers.
-
-**Happ** is not just a VPN client, but part of a commercial ecosystem aimed at VPN providers. It gives them extended capabilities by introducing restrictions for users.
-
-* Encrypted links (`happ://crypt5`) hide the real URL and prevent viewing server configurations;
-* The hardware identifier (**HWID**) tightly binds a purchased subscription to a specific device;
-* The lack of advanced settings in Happ makes it impossible to hide traffic from questionable providers using proxy chains;
-* If a [ProviderID](https://www.happ.su/main/ru/dev-docs/provider-id) is embedded into a `crypt5` link, the app will once a day compare the subscription domain hash, app version, and OS version against the data specified in the seller's dashboard on [happ-proxy.com](https://happ-proxy.com);
-* A seller who added a **ProviderID** to an encrypted link gains the ability to [remotely manage the application](https://www.happ.su/main/ru/dev-docs/app-management) without user interaction. Happ allows them to:
-  * Force-enable HWID transmission even if it is disabled in settings;
-  * Block manual User-Agent modification while still allowing remote changes;
-  * Manage local SOCKS and HTTP proxies by reconfiguring or disabling authentication;
-  * Force users to connect to a specific server when launching Happ;
-  * Disable global routing in Happ;
-  * Configure application proxying by adding or removing exclusions;
-  * Hide VPN servers depending on the connection type (Wi-Fi / mobile network);
-  * Configure automatic server testing (auto-ping) when opening the app;
-  * Control the `ping` type (`via Proxy - GET/HEAD`, `TCP`, `ICMP`) and specify a custom URL for server availability checks;
-  * Change the subscription URL;
-  * Set the subscription auto-update interval;
-  * Enable Happ auto-start on device boot;
-  * Force-update all subscriptions every time the app starts;
-  * Expand the server list after subscription updates or completely disable collapsing;
-  * Pin or unpin subscriptions in the main list;
-  * Change server sorting order alphabetically or by ping;
-  * Control traffic multiplexing.
-
-**The list is incomplete.** Management parameters are sent through HTTP headers and the response body with each subscription update.
-
-## Acknowledgements
-
-* **[slavrom21](https://github.com/21slavrom)** for his invaluable contribution to the project (and most of the hard work): reverse-engineering Happ to decrypt profiles, the Xray-to-sing-box converter, profile unlocking via Xposed, new animations, Monet support, and many other improvements.
-
-## Terms of Use
-
-You may use, copy, distribute, modify, and build this software for non-commercial purposes, provided that proper attribution is given to the authors (**Omegaplex**, **slavrom21**) and a link to the source repository is included (https://github.com/Omegaplexx/Happwner).
-
-Commercial use, sale, monetization, inclusion in commercial products, or generating profit from this software without the author's permission is prohibited.
-
-## Disclaimer
-
-I assume no obligations toward you as a user, do not guarantee the software will function correctly, and am not responsible for any actions you take.
-
-**Happ** attempts to prevent VPN server reselling by restricting user actions. I remove those restrictions and, in doing so, restore the ability to use servers for purposes beyond the provider's intended limitations. **I condemn any activity that harms a VPN provider's infrastructure and encourage using Happwner responsibly**: the program is intended for personal convenience and for sharing configurations with friends and family. Sharing Internet access is not wrong, as long as you do not create problems for the people providing it.
+Non-commercial use with attribution, per the [upstream terms](https://github.com/Omegaplexx/Happwner#terms-of-use). Use responsibly: the tool is meant for personal convenience and transparency about what your own subscriptions contain.
