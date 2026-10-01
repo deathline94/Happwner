@@ -20,6 +20,39 @@
 
 const DEFAULT_UA = 'Happ/1.16.2 (Android 15; Android SDK built for x86_64)';
 
+// The ten AES-128 keys built into Happ ("keyNN:..." ASCII, 16 bytes each),
+// from Happwner's HappCrypto.kt. Used when the provider sends an encrypted
+// body (key= in URL + Encrypt-Tag response header).
+const SUB_AES_KEYS = {
+  key01: 'key01:3jk#R2d&Dd',
+  key02: 'key02:+]%4ij#P"/',
+  key03: 'key03:?&YNg/"L3}',
+  key04: 'key04:+-4b"-?S${',
+  key05: 'key05:N5<a/(~jJ\'',
+  key06: 'key06:s5\\["=`uC/',
+  key07: 'key07:(H+b\'\')_@5',
+  key08: 'key08:W\'=)[/~i9w',
+  key09: 'key09:\'2%`C~>)_d',
+  key10: 'key10:)\\\'h]*#7MP',
+};
+const SUB_IV = new Uint8Array(12).fill(0x6b); // "kkkkkkkkkkkk"
+
+// Happ-encrypted body -> plaintext. ct is base64, tag is base64 (16 bytes);
+// JCE appends the tag to the ciphertext, exactly what WebCrypto expects.
+async function decryptSubBody(keyName, bodyB64, tagB64) {
+  const keyBytes = new TextEncoder().encode(SUB_AES_KEYS[keyName]);
+  const ct = atob(bodyB64.replace(/-/g, '+').replace(/_/g, '/').replace(/\s+/g, ''));
+  const tag = atob(tagB64.replace(/-/g, '+').replace(/_/g, '/').replace(/\s+/g, ''));
+  if (tag.length !== 16) throw new Error('Encrypt-Tag must be 16 bytes');
+  const joined = new Uint8Array(ct.length + 16);
+  for (let i = 0; i < ct.length; i++) joined[i] = ct.charCodeAt(i);
+  for (let i = 0; i < 16; i++) joined[ct.length + i] = tag.charCodeAt(i);
+
+  const key = await crypto.subtle.importKey('raw', keyBytes, 'AES-GCM', false, ['decrypt']);
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: SUB_IV }, key, joined);
+  return new TextDecoder().decode(plain);
+}
+
 // Response headers worth passing through to the client (traffic/expire display)
 const PASSTHROUGH_HEADERS = [
   'content-type',
@@ -37,7 +70,7 @@ function jsonError(status, message) {
 }
 
 export default {
-  async fetch(request) {
+  async fetch(request, env) {
     const url = new URL(request.url);
     if (url.pathname === '/' && !url.search) {
       return new Response('Happwner subscription relay is running.\n', {
@@ -46,9 +79,10 @@ export default {
       });
     }
 
-    // token check (set the TOKEN variable in worker settings)
+    // token check (set the TOKEN secret in worker settings)
     const token = url.searchParams.get('token') || request.headers.get('x-relay-token') || '';
-    if (typeof TOKEN === 'string' && TOKEN !== '' && token !== TOKEN) {
+    const expected = env && typeof env.TOKEN === 'string' ? env.TOKEN : '';
+    if (expected !== '' && token !== expected) {
       return jsonError(403, 'relay: bad or missing token');
     }
 
@@ -78,6 +112,24 @@ export default {
     }
     out.set('access-control-allow-origin', '*');
     out.set('cache-control', 'no-store');
+
+    // Happ-encrypted subscription? (key= in the target URL + Encrypt-Tag header)
+    // Decrypt here so plain clients get ordinary content. &decrypt=0 disables.
+    const wantDecrypt = url.searchParams.get('decrypt') !== '0';
+    const keyName = (() => {
+      try { return new URL(target).searchParams.get('key'); } catch (e) { return null; }
+    })();
+    const tagB64 = upstream.headers.get('encrypt-tag');
+    if (wantDecrypt && keyName && SUB_AES_KEYS[keyName] && tagB64 && upstream.status === 200) {
+      try {
+        const plain = await decryptSubBody(keyName, await upstream.text(), tagB64);
+        out.delete('content-disposition');
+        out.set('content-type', 'text/plain; charset=utf-8');
+        return new Response(plain, { status: 200, headers: out });
+      } catch (e) {
+        // fall through: serve the original (encrypted) body
+      }
+    }
 
     return new Response(upstream.body, { status: upstream.status, headers: out });
   },
