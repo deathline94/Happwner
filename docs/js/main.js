@@ -433,10 +433,11 @@
     params.set('url', target);
     const hwid = $('subHwid').value.trim();
     if (hwid) params.set('hwid', hwid);
-    // only forward a deliberate client UA — the worker already defaults to the
-    // Happ User-Agent, which is what strict providers require
+    // only forward a *deliberate* UA: the worker already sends the Happ Android
+    // UA by default, so embedding that preset (or this browser's UA) is noise
     const ua = $('subUa').value.trim();
-    if (ua && ua !== navigator.userAgent) params.set('ua', ua);
+    const workerDefaultUa = SF.UA_PRESETS.happ_android;
+    if (ua && ua !== navigator.userAgent && ua !== workerDefaultUa) params.set('ua', ua);
     return base + '/?' + params.toString();
   }
 
