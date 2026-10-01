@@ -11,6 +11,16 @@
 An Android app and Xposed module for exporting subscriptions from the proxy utility [Happ](https://play.google.com/store/apps/details?id=com.happproxy) into any VPN apps (NekoBox, v2rayNG, Hiddify, and similar clients).
 
 **Android 5.0+** is supported.
+
+**🌐 Web version included** — this repository ships a fully client-side web port of the crypto & conversion engine in [`docs/`](docs/), deployable to GitHub Pages (no backend, no build step):
+
+* `happ://crypt` … `crypt5` link decryption (RSA PKCS#1 + ChaCha20-Poly1305, legacy & salted layouts)
+* Encrypted subscription bodies (AES-128-GCM, `key01`–`key10` + `Encrypt-Tag`)
+* `happ://add/`, `v2raytun://crypt|import`, `incy://` handling incl. http(s)-wrapped links
+* Base64 ↔ links, JSON outbounds → proxy links, Xray → sing-box conversion & merging
+* HWID generator for `x-hwid`, batch mode, server overview cards
+
+Open `docs/index.html` via any static server (or the Pages URL). Tests: `node tests/crypto-test.mjs && node tests/converter-test.mjs`.
 </div>
 
 ## Screenshots

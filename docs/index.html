@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Happwner Web — decrypt happ://crypt links and encrypted Happ subscription profiles right in your browser. 100% client-side.">
+  <title>Happwner Web — Happ link &amp; subscription decryptor</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%237c5cff'/%3E%3Cpath d='M17.5 4 8 18h6l-1.5 10L22 14h-6l1.5-10z' fill='%23fff'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo" aria-hidden="true">
+          <svg viewBox="0 0 32 32" width="34" height="34"><rect width="32" height="32" rx="8" fill="#7c5cff"/><path d="M17.5 4 8 18h6l-1.5 10L22 14h-6l1.5-10z" fill="#fff"/></svg>
+        </div>
+        <div>
+          <h1>Happwner <span class="web">Web</span></h1>
+          <p class="tagline">Happ link &amp; subscription decryptor — everything runs in your browser</p>
+        </div>
+      </div>
+      <nav class="extlinks">
+        <a href="https://github.com/Omegaplexx/Happwner" target="_blank" rel="noopener">Original project ↗</a>
+      </nav>
+    </header>
+
+    <nav class="tabs" role="tablist">
+      <button class="tab-btn active" data-tab="decrypt" role="tab">🔓 Decrypt</button>
+      <button class="tab-btn" data-tab="subscription" role="tab">📡 Subscription</button>
+      <button class="tab-btn" data-tab="converter" role="tab">🔁 Converter</button>
+      <button class="tab-btn" data-tab="about" role="tab">ℹ️ About</button>
+    </nav>
+
+    <main>
+      <!-- ===================== DECRYPT ===================== -->
+      <section id="tab-decrypt" class="tab active">
+        <div class="card">
+          <h2>Link decryption</h2>
+          <p class="hint">Paste <code>happ://crypt…</code>, <code>happ://add/…</code>, <code>v2raytun://crypt/…</code>, <code>v2raytun://import/…</code>, <code>incy://…</code> links — or an http(s) URL that wraps one. One link per line for batch processing.</p>
+          <textarea id="decInput" rows="6" spellcheck="false" placeholder="happ://crypt5/…&#10;happ://add/https%3A%2F%2F…&#10;https://t.me/redirect?url=happ%3A%2F%2Fcrypt%2F…"></textarea>
+          <div class="row">
+            <button id="btnDecrypt" class="primary">Decrypt</button>
+            <button id="btnPasteDec">Paste</button>
+            <button id="btnClearDec">Clear</button>
+            <label class="chk"><input type="checkbox" id="optJsonToUri" checked> JSON → links</label>
+            <label class="chk"><input type="checkbox" id="optTryB64" checked> try Base64</label>
+            <label class="chk"><input type="checkbox" id="optXrayToSb"> Xray → sing-box</label>
+          </div>
+          <div id="decStatus" class="status" hidden></div>
+          <div class="outgroup">
+            <div class="outbar">
+              <span>Result</span>
+              <span class="outbtns">
+                <button id="btnCopyDec" class="mini">Copy</button>
+                <button id="btnDlDec" class="mini">Download</button>
+              </span>
+            </div>
+            <textarea id="decOutput" rows="8" readonly spellcheck="false" placeholder="Decrypted links and configurations will appear here."></textarea>
+          </div>
+          <div id="decServers" class="servers"></div>
+        </div>
+      </section>
+
+      <!-- ===================== SUBSCRIPTION ===================== -->
+      <section id="tab-subscription" class="tab">
+        <div class="card">
+          <h2>Subscription fetcher</h2>
+          <p class="hint">Fetch a subscription URL, auto-decrypt <code>key=…</code> bodies (needs the <code>Encrypt-Tag</code> header — see manual mode if your browser can't read it) and convert the result.</p>
+
+          <label class="lbl" for="subUrl">Subscription URL</label>
+          <input id="subUrl" type="text" spellcheck="false" placeholder="https://provider.example/api/v1/client/subscribe?token=…&key=key03">
+
+          <div class="grid2">
+            <div>
+              <label class="lbl" for="subHwid">HWID <span class="sublbl">(x-hwid header — device binding / spoofing)</span></label>
+              <div class="inline">
+                <input id="subHwid" type="text" spellcheck="false" placeholder="random16chars1234">
+                <button id="btnHwidGen" class="mini" title="Generate a random HWID">🎲 Generate</button>
+              </div>
+              <label class="chk"><input type="checkbox" id="chkHwidRandom"> new random HWID per request</label>
+            </div>
+            <div>
+              <label class="lbl" for="subUa">User-Agent preset <span class="sublbl">(informational — browsers can't override the UA header)</span></label>
+              <div class="inline">
+                <select id="uaPreset">
+                  <option value="">— none —</option>
+                  <option value="happ_android">Happ / Android</option>
+                  <option value="happ_ios">Happ / iOS</option>
+                  <option value="v2rayng">v2rayNG</option>
+                  <option value="nekobox">NekoBox</option>
+                  <option value="curl">curl</option>
+                </select>
+                <input id="subUa" type="text" spellcheck="false" placeholder="custom User-Agent">
+              </div>
+            </div>
+          </div>
+
+          <div class="inline">
+            <label class="lbl" for="subProxy">Transport</label>
+            <select id="subProxy">
+              <option value="auto">Auto (direct → CORS proxies)</option>
+              <option value="direct">Direct only</option>
+              <option value="corsproxy">corsproxy.io</option>
+              <option value="allorigins">api.allorigins.win</option>
+              <option value="codetabs">api.codetabs.com</option>
+            </select>
+            <button id="btnFetch" class="primary">Fetch &amp; process</button>
+          </div>
+
+          <details id="manualBox">
+            <summary>Manual mode — paste the raw body yourself</summary>
+            <p class="hint">If fetching through a proxy hides the <code>Encrypt-Tag</code> header, paste the response body and the tag here (visible in DevTools → Network → response headers). The <code>key</code> parameter is taken from the URL above unless overridden.</p>
+            <textarea id="manualBody" rows="4" spellcheck="false" placeholder="paste raw (encrypted) subscription body…"></textarea>
+            <div class="grid2">
+              <div class="inline">
+                <label class="lbl" for="manualTag">Encrypt-Tag</label>
+                <input id="manualTag" type="text" spellcheck="false" placeholder="base64 tag from response headers">
+              </div>
+              <div class="inline">
+                <label class="lbl" for="manualKey">Key</label>
+                <input id="manualKey" type="text" spellcheck="false" placeholder="key01 … key10 (auto from URL)">
+              </div>
+            </div>
+            <button id="btnManual" class="primary">Process pasted body</button>
+          </details>
+
+          <div id="subStatus" class="status" hidden></div>
+          <div class="outgroup">
+            <div class="outbar">
+              <span>Result</span>
+              <span class="outbtns">
+                <button id="btnWrapAdd" class="mini" title="Wrap the URL above into a happ://add/ link">Wrap → happ://add/</button>
+                <button id="btnCopySub" class="mini">Copy</button>
+                <button id="btnDlSub" class="mini">Download</button>
+              </span>
+            </div>
+            <textarea id="subOutput" rows="10" readonly spellcheck="false" placeholder="Fetched / decrypted subscription content will appear here."></textarea>
+          </div>
+          <div id="subServers" class="servers"></div>
+        </div>
+      </section>
+
+      <!-- ===================== CONVERTER ===================== -->
+      <section id="tab-converter" class="tab">
+        <div class="card">
+          <h2>Config converter</h2>
+          <p class="hint">Convert between subscription formats: Base64 blobs, proxy links, JSON outbounds and Xray / sing-box configs.</p>
+          <textarea id="convInput" rows="8" spellcheck="false" placeholder="vless://…&#10;vmess://…&#10;base64 blob…&#10;xray / sing-box JSON…"></textarea>
+          <div class="row">
+            <label class="chk"><input type="checkbox" id="cJsonToUri" checked> JSON → links</label>
+            <label class="chk"><input type="checkbox" id="cTryB64" checked> try Base64</label>
+            <label class="chk"><input type="checkbox" id="cXrayToSb"> Xray → sing-box</label>
+            <select id="cSbMode" title="sing-box output mode">
+              <option value="merged">sing-box: merged config</option>
+              <option value="outbounds">sing-box: outbounds only</option>
+            </select>
+          </div>
+          <div class="row">
+            <button id="btnConvert" class="primary">Convert</button>
+            <button id="btnPasteConv">Paste</button>
+            <button id="btnClearConv">Clear</button>
+            <button id="btnSwapConv" class="mini" title="Move the result back into the input">Use result as input</button>
+          </div>
+          <div id="convStatus" class="status" hidden></div>
+          <div class="outgroup">
+            <div class="outbar">
+              <span>Result</span>
+              <span class="outbtns">
+                <button id="btnCopyConv" class="mini">Copy</button>
+                <button id="btnDlConv" class="mini">Download</button>
+              </span>
+            </div>
+            <textarea id="convOutput" rows="10" readonly spellcheck="false" placeholder="Converted output will appear here."></textarea>
+          </div>
+          <div id="convServers" class="servers"></div>
+        </div>
+      </section>
+
+      <!-- ===================== ABOUT ===================== -->
+      <section id="tab-about" class="tab">
+        <div class="card">
+          <h2>About Happwner Web</h2>
+          <p>A fully client-side port of <a href="https://github.com/Omegaplexx/Happwner" target="_blank" rel="noopener">Happwner</a> — the Android app &amp; Xposed module that extracts clean VPN configurations from the Happ proxy client. This web version keeps the crypto and conversion engine and drops the Android-only parts (Xposed hooks, the local bridge service, intent handling).</p>
+          <h3>What works here</h3>
+          <ul>
+            <li><b>Link decryption</b> — <code>happ://crypt</code> … <code>happ://crypt5</code> (RSA + ChaCha20-Poly1305, legacy &amp; salted layouts), <code>v2raytun://crypt/</code> (RSA-4096), plus <code>happ://add/</code>, <code>v2raytun://import/</code> and <code>incy://</code> unwrapping, incl. links wrapped in http(s) URLs.</li>
+            <li><b>Encrypted subscription profiles</b> — AES-128-GCM bodies signed with the <code>Encrypt-Tag</code> header and the ten keys built into Happ (<code>key01</code> … <code>key10</code>).</li>
+            <li><b>HWID field</b> — generate random hardware IDs to send as <code>x-hwid</code> when fetching subscriptions.</li>
+            <li><b>Converter</b> — Base64 ↔ links, JSON outbounds → proxy links (vless/vmess/ss/trojan/hysteria2/tuic), full Xray → sing-box config conversion and merging.</li>
+            <li><b>Server overview</b> — decrypted output is parsed into server cards so you can see hosts, ports, security and transport at a glance.</li>
+            <li><b>Batch mode</b> — one link per line.</li>
+          </ul>
+          <h3>Not available in a browser</h3>
+          <ul>
+            <li>Xposed features (link interception, HWID spoofing <i>inside</i> Happ, profile unlocking, gestures) — they hook other apps at the OS level.</li>
+            <li>The local "bridge" HTTP service on port 8166 that feeds updated subscriptions to other VPN apps.</li>
+          </ul>
+          <h3>Privacy</h3>
+          <p>Decryption happens entirely in your browser — links, keys and configs are never uploaded anywhere. The optional subscription fetcher is the only network feature; with the CORS proxies it routes the request through a third-party relay, so for sensitive subscriptions prefer the manual paste mode.</p>
+          <h3>Credits &amp; license</h3>
+          <p>Based on <b>Happwner</b> by <a href="https://github.com/Omegaplexx" target="_blank" rel="noopener">Omegaplex</a> and <a href="https://github.com/21slavrom" target="_blank" rel="noopener">slavrom21</a>. Non-commercial use with attribution, per the <a href="https://github.com/Omegaplexx/Happwner#terms-of-use" target="_blank" rel="noopener">original terms</a>. Use responsibly: meant for personal convenience and transparency about what your own subscriptions contain.</p>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <span> Happwner Web — client-side port · no data leaves your browser · <a href="https://github.com/Omegaplexx/Happwner" target="_blank" rel="noopener">upstream project</a></span>
+    </footer>
+  </div>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="js/keys.js"></script>
+  <script src="js/util.js"></script>
+  <script src="js/rsa.js"></script>
+  <script src="js/chacha.js"></script>
+  <script src="js/aesgcm.js"></script>
+  <script src="js/happcrypto.js"></script>
+  <script src="js/v2raytun.js"></script>
+  <script src="js/singbox.js"></script>
+  <script src="js/linkconverter.js"></script>
+  <script src="js/linkparse.js"></script>
+  <script src="js/subfetch.js"></script>
+  <script src="js/main.js"></script>
+</body>
+</html>
