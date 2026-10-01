@@ -408,6 +408,52 @@
   $('btnCopySub').addEventListener('click', () => $('subOutput').value ? copyText($('subOutput').value) : toast('Nothing to copy'));
   $('btnDlSub').addEventListener('click', () => $('subOutput').value ? downloadText($('subOutput').value, 'subscription.txt') : toast('Nothing to download'));
 
+  // ---------- Cloudflare Worker relay link ----------
+  // When the user has configured their worker address, every subscription URL
+  // also gets a ready-made relay link (one-click copy) for auto-updating in
+  // plain clients (e.g. Windows 10, whose system TLS lacks TLS 1.3).
+  function buildWorkerLink() {
+    let base = $('workerBase').value.trim();
+    if (!base) return null;
+    if (!/^https?:\/\//i.test(base)) base = 'https://' + base;
+    try {
+      const u = new URL(base);
+      if (!/^https?:$/.test(u.protocol) || !u.hostname.includes('.')) return null;
+      u.search = '';
+      u.hash = '';
+      base = u.toString().replace(/\/+$/, '');
+    } catch (e) { return null; }
+
+    const target = $('subUrl').value.trim();
+    if (!/^https?:\/\//i.test(target)) return null;
+
+    const params = new URLSearchParams();
+    const token = $('workerToken').value.trim();
+    if (token) params.set('token', token);
+    params.set('url', target);
+    const hwid = $('subHwid').value.trim();
+    if (hwid) params.set('hwid', hwid);
+    // only forward a deliberate client UA — the worker already defaults to the
+    // Happ User-Agent, which is what strict providers require
+    const ua = $('subUa').value.trim();
+    if (ua && ua !== navigator.userAgent) params.set('ua', ua);
+    return base + '/?' + params.toString();
+  }
+
+  function updateWorkerRow() {
+    const link = buildWorkerLink();
+    $('workerRow').hidden = link === null;
+    if (link !== null) $('workerLink').value = link;
+  }
+
+  ['workerBase', 'workerToken', 'subUrl', 'subHwid', 'subUa'].forEach((id) => {
+    $(id).addEventListener('input', updateWorkerRow);
+  });
+  $('btnCopyWorker').addEventListener('click', () => {
+    const link = $('workerLink').value;
+    if (link) copyText(link);
+  });
+
   // =====================================================
   // CONVERTER TAB
   // =====================================================
@@ -481,7 +527,9 @@
   // ---------- bind prefs ----------
   ['optJsonToUri', 'optTryB64', 'optXrayToSb'].forEach((id) => bindPref(id, id));
   ['cJsonToUri', 'cTryB64', 'cXrayToSb', 'cSbMode'].forEach((id) => bindPref(id, id));
-  ['subUrl', 'subHwid', 'subUa'].forEach((id) => bindPref(id, id, true));
+  ['subUrl', 'subHwid', 'subUa', 'workerBase', 'workerToken'].forEach((id) => bindPref(id, id, true));
   bindPref('chkHwidRandom', 'chkHwidRandom');
   bindPref('subProxy', 'subProxy');
+
+  updateWorkerRow();
 })();

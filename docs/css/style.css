@@ -149,6 +149,10 @@ button.mini { padding: 5px 10px; font-size: 12px; border-radius: 7px; }
 }
 .outbtns { display: flex; gap: 6px; }
 .outgroup textarea { border: none; border-radius: 0; resize: vertical; background: #10121c; }
+.worker-row input[type="text"] {
+  border: none; border-radius: 0; background: #10121c;
+  font-size: 12px; color: #9fe8c0;
+}
 
 .status {
   margin-top: 14px; padding: 10px 14px; border-radius: 9px; font-size: 13.5px;

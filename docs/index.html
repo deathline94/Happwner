@@ -110,6 +110,21 @@
             <button id="btnFetch" class="primary">Fetch &amp; process</button>
           </div>
 
+          <details id="workerBox">
+            <summary>Cloudflare Worker relay (optional)</summary>
+            <p class="hint">Deploy <a href="https://github.com/deathline94/Happwner-Web/blob/main/worker/sub-relay.js" target="_blank" rel="noopener">worker/sub-relay.js</a> (fixes Windows 10 auto-updates: the relay speaks TLS 1.3 and sends the Happ User-Agent, and auto-decrypts <code>key=</code>-encrypted bodies). Paste its address here and every subscription below also gets a ready-made relay link.</p>
+            <div class="grid2">
+              <div class="inline">
+                <label class="lbl" for="workerBase">Worker address</label>
+                <input id="workerBase" type="text" spellcheck="false" placeholder="https://your-worker.your-subdomain.workers.dev">
+              </div>
+              <div class="inline">
+                <label class="lbl" for="workerToken">Relay token <span class="sublbl">(the TOKEN secret, if you set one)</span></label>
+                <input id="workerToken" type="text" spellcheck="false" placeholder="e.g. 3c98…">
+              </div>
+            </div>
+          </details>
+
           <details id="manualBox">
             <summary>Manual mode — paste the raw body yourself</summary>
             <p class="hint">If fetching through a proxy hides the <code>Encrypt-Tag</code> header, paste the response body and the tag here (visible in DevTools → Network → response headers). The <code>key</code> parameter is taken from the URL above unless overridden.</p>
@@ -138,6 +153,15 @@
               </span>
             </div>
             <textarea id="subOutput" rows="10" readonly spellcheck="false" placeholder="Fetched / decrypted subscription content will appear here."></textarea>
+          </div>
+          <div id="workerRow" class="outgroup worker-row" hidden>
+            <div class="outbar">
+              <span>Worker relay link — paste this into any client for auto-updates</span>
+              <span class="outbtns">
+                <button id="btnCopyWorker" class="mini">Copy</button>
+              </span>
+            </div>
+            <input id="workerLink" type="text" readonly spellcheck="false">
           </div>
           <div id="subServers" class="servers"></div>
         </div>
