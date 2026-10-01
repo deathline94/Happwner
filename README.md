@@ -12,7 +12,7 @@ An Android app and Xposed module for exporting subscriptions from the proxy util
 
 **Android 5.0+** is supported.
 
-**🌐 Web version included** — this repository ships a fully client-side web port of the crypto & conversion engine in [`docs/`](docs/), deployable to GitHub Pages (no backend, no build step):
+**🌐 Web version included** — this repository ships a fully client-side web port of the crypto & conversion engine in [`docs/`](docs/), **live on GitHub Pages: <https://deathline94.github.io/Happwner-Web/>** (no backend, no build step):
 
 * `happ://crypt` … `crypt5` link decryption (RSA PKCS#1 + ChaCha20-Poly1305, legacy & salted layouts)
 * Encrypted subscription bodies (AES-128-GCM, `key01`–`key10` + `Encrypt-Tag`)

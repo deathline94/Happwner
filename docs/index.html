@@ -81,10 +81,10 @@
               <label class="chk"><input type="checkbox" id="chkHwidRandom"> new random HWID per request</label>
             </div>
             <div>
-              <label class="lbl" for="subUa">User-Agent preset <span class="sublbl">(informational — browsers can't override the UA header)</span></label>
+              <label class="lbl" for="subUa">User-Agent <span class="sublbl">(presets or your browser's real UA — note: browsers send their own UA, ignoring this field)</span></label>
               <div class="inline">
                 <select id="uaPreset">
-                  <option value="">— none —</option>
+                  <option value="">— preset —</option>
                   <option value="happ_android">Happ / Android</option>
                   <option value="happ_ios">Happ / iOS</option>
                   <option value="v2rayng">v2rayNG</option>
@@ -92,7 +92,9 @@
                   <option value="curl">curl</option>
                 </select>
                 <input id="subUa" type="text" spellcheck="false" placeholder="custom User-Agent">
+                <button id="btnUaExtract" class="mini" title="Extract this browser's real User-Agent into the field and copy it">Extract UA</button>
               </div>
+              <div class="uareal">This page's requests are actually sent as: <code id="uaReal">…</code></div>
             </div>
           </div>
 

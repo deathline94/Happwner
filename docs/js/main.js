@@ -387,6 +387,16 @@
       savePrefs();
     }
   });
+  // UA extraction: put the browser's real User-Agent into the field and copy it
+  $('uaReal').textContent = navigator.userAgent;
+  $('btnUaExtract').addEventListener('click', async () => {
+    const ua = navigator.userAgent;
+    $('subUa').value = ua;
+    prefs.subUa = ua;
+    savePrefs();
+    await copyText(ua);
+    toast('Browser User-Agent extracted & copied');
+  });
   $('btnWrapAdd').addEventListener('click', () => {
     const url = $('subUrl').value.trim();
     if (!url) { toast('Enter a URL first'); return; }
